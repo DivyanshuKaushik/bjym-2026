@@ -6,6 +6,41 @@ html, body {
   background-color: #FAF8F4;
 }
 
+/* ---- Mobile-first foundations ---- */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  overflow-x: hidden; /* belt-and-suspenders against any stray wide element */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Every interactive control gets a comfortable minimum touch target on
+   touch devices, per WCAG 2.5.5 / mobile-first guidance. */
+@media (hover: none) and (pointer: coarse) {
+  button, a, input[type="checkbox"], input[type="radio"], select {
+    min-height: 40px;
+  }
+}
+
+/* Prevent iOS auto-zoom on focus for inputs under 16px */
+input, select, textarea {
+  font-size: 16px;
+}
+@media (min-width: 640px) {
+  input, select, textarea {
+    font-size: 14px;
+  }
+}
+
+img, svg {
+  max-width: 100%;
+  height: auto;
+}
+
 @keyframes shine {
   0% { transform: translateX(-130%) skewX(-18deg); }
   100% { transform: translateX(240%) skewX(-18deg); }

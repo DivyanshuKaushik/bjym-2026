@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useLang } from "@/lib/i18n/LanguageProvider";
 import { MembershipCard } from "@/components/id-card/MembershipCard";
 import { DownloadCardButtons } from "@/components/id-card/DownloadCardButtons";
@@ -9,52 +9,53 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
-import { updatePassword } from "@/app/actions/auth";
-import { formatDate } from "@/lib/utils";
-import type { Membership } from "@/lib/types";
+import { Badge } from "@/components/ui/badge";
+import { changeMpin, recordIdCardDownload } from "@/app/actions/member";
+import { logoutEverywhere } from "@/app/actions/logout";
+import { formatDate, formatDateNumeric } from "@/lib/utils";
+import type { MemberRow } from "@/lib/repositories/member.repository";
 
 export function DashboardClient({
-  membership,
-  referralCount,
-  signatoryName,
-  signatoryTitleHi,
+  member, referralCount, signatoryName, signatoryTitleHi, portalWebsite,
 }: {
-  membership: Membership;
+  member: MemberRow;
   referralCount: number;
   signatoryName: string;
   signatoryTitleHi: string;
+  portalWebsite: string;
 }) {
   const { d } = useLang();
   const cardRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState("card");
   const [siteUrl, setSiteUrl] = useState("");
 
-  useState(() => {
-    if (typeof window !== "undefined") setSiteUrl(window.location.origin);
-  });
+  useEffect(() => { setSiteUrl(window.location.origin); }, []);
 
   const cardData = {
-    membershipId: membership.membership_id,
-    fullName: membership.full_name,
-    dob: formatDate(membership.dob),
-    mandalNameHi: membership.mandals?.name_hi || "—",
-    districtNameHi: membership.districts?.name_hi || "—",
-    photoBase64: membership.photo_base64,
-    joinedAt: formatDate(membership.joined_at),
-    status: membership.status,
+    membershipId: member.membership_id,
+    fullName: member.full_name,
+    dob: formatDateNumeric(member.dob),
+    districtNameHi: member.district_name_hi,
+    mandalNameHi: member.mandal_name_hi,
+    photoBase64: member.photo_base64,
     signatoryName,
     signatoryTitleHi,
+    portalWebsite,
     verifyBaseUrl: `${siteUrl}/verify`,
   };
 
-  const referralLink = `${siteUrl}/register?ref=${membership.referral_code}`;
+  const referralLink = `${siteUrl}/register?ref=${member.referral_code}`;
+
+  const verificationTone = member.verification_status === "Verified" ? "success" : member.verification_status === "Rejected" ? "danger" : "warning";
 
   return (
     <div className="mx-auto max-w-[1000px] px-4 py-10 sm:px-8">
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <div>
-          <div className="text-2xl font-black text-heading">{d.dashboard.welcome}, {membership.full_name}</div>
-          <div className="text-[12.5px] text-muted">{membership.membership_id}</div>
+          <div className="text-2xl font-black text-heading">{d.dashboard.welcome}, {member.full_name}</div>
+          <div className="flex items-center gap-2 text-[12.5px] text-muted">
+            {member.membership_id} <Badge tone={verificationTone}>{member.verification_status}</Badge>
+          </div>
         </div>
         <div className="ml-auto">
           <Tabs
@@ -69,11 +70,29 @@ export function DashboardClient({
         </div>
       </div>
 
+      {member.verification_status === "Pending" && (
+        <div className="mb-6 rounded-2xl border border-warning/30 bg-amber-50 px-5 py-3 text-[13px] font-bold text-amber-800">
+          आपका फोटो एवं विवरण सत्यापन के लिए लंबित है। सत्यापन पूर्ण होने तक ID Card अस्थायी मान्य है।
+        </div>
+      )}
+      {member.verification_status === "Rejected" && (
+        <div className="mb-6 rounded-2xl border border-danger/30 bg-red-50 px-5 py-3 text-[13px] font-bold text-danger">
+          आपका आवेदन अस्वीकृत हुआ है। कारण: {member.rejection_reason || "—"}
+        </div>
+      )}
+
       {tab === "card" && (
         <div className="text-center">
-          <MembershipCard data={cardData} ref={cardRef} />
+          <div className="mx-auto w-fit">
+            <MembershipCard data={cardData} ref={cardRef} />
+          </div>
           <div className="mt-7">
-            <DownloadCardButtons cardRef={cardRef} fileName={membership.membership_id} labels={{ png: d.dashboard.downloadPng, pdf: d.dashboard.downloadPdf }} />
+            <DownloadCardButtons
+              cardRef={cardRef}
+              fileName={member.membership_id}
+              labels={{ png: d.dashboard.downloadPng, pdf: d.dashboard.downloadPdf }}
+              onDownloaded={() => recordIdCardDownload()}
+            />
           </div>
         </div>
       )}
@@ -83,42 +102,16 @@ export function DashboardClient({
           <Card>
             <CardContent className="text-center">
               <div className="text-[11px] font-extrabold uppercase tracking-wide text-muted">{d.dashboard.referralCode}</div>
-              <div className="mt-1 text-3xl font-black text-primary-dark">{membership.referral_code}</div>
+              <div className="mt-1 text-3xl font-black text-primary-dark">{member.referral_code}</div>
               <div className="mt-5 text-[11px] font-extrabold uppercase tracking-wide text-muted">{d.dashboard.referralLink}</div>
               <div className="mt-2 flex gap-2">
                 <Input readOnly value={referralLink} className="text-xs" />
-                <Button
-                  variant="ghost"
-                  onClick={() => navigator.clipboard.writeText(referralLink)}
-                >
-                  {d.dashboard.copyLink}
-                </Button>
+                <Button variant="ghost" onClick={() => navigator.clipboard.writeText(referralLink)}>{d.dashboard.copyLink}</Button>
               </div>
               <div className="mt-6 flex justify-center gap-2">
-                <a
-                  href={`https://wa.me/?text=${encodeURIComponent(referralLink)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-full border border-border bg-white px-4 py-2 text-xs font-bold hover:-translate-y-0.5 transition-transform"
-                >
-                  🟢 WhatsApp
-                </a>
-                <a
-                  href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLink)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-full border border-border bg-white px-4 py-2 text-xs font-bold hover:-translate-y-0.5 transition-transform"
-                >
-                  🔵 Facebook
-                </a>
-                <a
-                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(referralLink)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-full border border-border bg-white px-4 py-2 text-xs font-bold hover:-translate-y-0.5 transition-transform"
-                >
-                  ⚫ X
-                </a>
+                <a href={`https://wa.me/?text=${encodeURIComponent(referralLink)}`} target="_blank" rel="noreferrer" className="rounded-full border border-border bg-white px-4 py-2 text-xs font-bold transition-transform hover:-translate-y-0.5">🟢 WhatsApp</a>
+                <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(referralLink)}`} target="_blank" rel="noreferrer" className="rounded-full border border-border bg-white px-4 py-2 text-xs font-bold transition-transform hover:-translate-y-0.5">🔵 Facebook</a>
+                <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(referralLink)}`} target="_blank" rel="noreferrer" className="rounded-full border border-border bg-white px-4 py-2 text-xs font-bold transition-transform hover:-translate-y-0.5">⚫ X</a>
               </div>
             </CardContent>
           </Card>
@@ -131,67 +124,80 @@ export function DashboardClient({
         </div>
       )}
 
-      {tab === "profile" && <ProfilePanel membership={membership} />}
+      {tab === "profile" && <ProfilePanel member={member} />}
     </div>
   );
 }
 
-function ProfilePanel({ membership }: { membership: Membership }) {
+function ProfilePanel({ member }: { member: MemberRow }) {
   const { d } = useLang();
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
+  const [currentMpin, setCurrentMpin] = useState("");
+  const [newMpin, setNewMpin] = useState("");
+  const [confirmMpin, setConfirmMpin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const changePassword = (e: React.FormEvent) => {
+  const submitMpin = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setMsg(null);
-    if (password !== confirm) return setError("पासवर्ड मेल नहीं खाते");
-    if (password.length < 8) return setError("पासवर्ड कम से कम 8 अक्षर का हो");
     startTransition(async () => {
-      const res = await updatePassword(password);
+      const res = await changeMpin({ currentMpin, newMpin, confirmMpin });
       if (res?.error) setError(res.error);
-      else {
-        setMsg("पासवर्ड सफलतापूर्वक बदल दिया गया ✓");
-        setPassword("");
-        setConfirm("");
-      }
+      // success redirects to /dashboard automatically
     });
+  };
+
+  const doLogoutEverywhere = () => {
+    if (!confirm("सभी devices से logout करें?")) return;
+    startTransition(async () => { await logoutEverywhere(); });
   };
 
   return (
     <div className="mx-auto grid max-w-[560px] gap-4">
       <Card>
         <CardContent className="grid gap-2 text-sm">
-          <Row label="नाम" value={membership.full_name} />
-          <Row label="पिता/पति का नाम" value={membership.father_name} />
-          <Row label="मोबाइल" value={membership.phone} />
-          <Row label="ईमेल" value={membership.email} />
-          <Row label="जिला" value={membership.districts?.name_hi || "—"} />
-          <Row label="विधानसभा" value={membership.assemblies?.name_hi || "—"} />
-          <Row label="मंडल" value={membership.mandals?.name_hi || "—"} />
-          <Row label="बूथ" value={membership.booth} />
+          <Row label="नाम" value={member.full_name} />
+          <Row label="पिता/पति का नाम" value={member.father_name} />
+          <Row label="मोबाइल" value={member.mobile} />
+          <Row label="WhatsApp" value={member.whatsapp} />
+          <Row label="ईमेल" value={member.email} />
+          <Row label="वर्ग" value={member.category} />
+          <Row label="जाति" value={member.jaati} />
+          <Row label="लोकसभा" value={member.loksabha_name_hi || "—"} />
+          <Row label="जिला" value={member.district_name_hi} />
+          <Row label="विधानसभा" value={member.assembly_name_hi} />
+          <Row label="मंडल" value={member.mandal_name_hi} />
+          <Row label="बूथ" value={member.booth || "—"} />
         </CardContent>
       </Card>
 
       <Card>
         <CardContent>
-          <div className="mb-3 font-black text-heading">{d.dashboard.changePassword}</div>
+          <div className="mb-3 font-black text-heading">MPIN बदलें</div>
           {error && <div className="mb-3 rounded-xl border border-danger/30 bg-red-50 px-3 py-2 text-xs font-bold text-danger">{error}</div>}
-          {msg && <div className="mb-3 rounded-xl border border-secondary/30 bg-secondary-light px-3 py-2 text-xs font-bold text-secondary-dark">{msg}</div>}
-          <form onSubmit={changePassword} className="grid gap-3">
+          <form onSubmit={submitMpin} className="grid gap-3">
             <div>
-              <Label required>नया पासवर्ड</Label>
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <Label required>वर्तमान MPIN</Label>
+              <Input type="password" inputMode="numeric" maxLength={6} value={currentMpin} onChange={(e) => setCurrentMpin(e.target.value.replace(/\D/g, ""))} required />
             </div>
             <div>
-              <Label required>पुष्टि करें</Label>
-              <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+              <Label required>नया MPIN (4 या 6 अंक)</Label>
+              <Input type="password" inputMode="numeric" maxLength={6} value={newMpin} onChange={(e) => setNewMpin(e.target.value.replace(/\D/g, ""))} required />
             </div>
-            <Button type="submit" disabled={pending}>{pending ? "…" : "अपडेट करें"}</Button>
+            <div>
+              <Label required>नया MPIN पुष्टि करें</Label>
+              <Input type="password" inputMode="numeric" maxLength={6} value={confirmMpin} onChange={(e) => setConfirmMpin(e.target.value.replace(/\D/g, ""))} required />
+            </div>
+            <Button type="submit" disabled={pending}>{pending ? "…" : "MPIN अपडेट करें"}</Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <div className="mb-2 font-black text-heading">Logout Everywhere</div>
+          <p className="mb-3 text-xs text-muted">यह सभी devices से आपका session समाप्त कर देगा — दोबारा login करना होगा।</p>
+          <Button variant="danger" size="sm" onClick={doLogoutEverywhere} disabled={pending}>सभी Devices से Logout करें</Button>
         </CardContent>
       </Card>
     </div>

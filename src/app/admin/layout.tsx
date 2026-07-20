@@ -1,29 +1,29 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
+import { memberRepository } from "@/lib/repositories/member.repository";
+import { AdminSidebar } from "@/components/admin/AdminSidebar";
+import { AdminTopbar } from "@/components/admin/AdminTopbar";
+import type { Permission } from "@/lib/rbac/permissions";
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const tabs = [
-    { href: "/admin", label: "Overview" },
-    { href: "/admin/members", label: "Members" },
-    { href: "/admin/analytics", label: "Analytics" },
-    { href: "/admin/hierarchy", label: "Hierarchy" },
-    { href: "/admin/settings", label: "Settings" },
-  ];
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const session = await auth();
+  if (!session?.user || session.user.userType !== "admin") redirect("/admin-login");
+
+  const permissions = (session.user.permissions ?? []) as Permission[];
+  const kpis = await memberRepository.kpis();
+
   return (
-    <div className="mx-auto max-w-[1100px] px-4 py-8 sm:px-8">
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <div>
-          <div className="text-2xl font-black text-heading">Admin Dashboard</div>
-          <div className="text-[12.5px] text-muted">BJYM Chhattisgarh · Live membership intelligence</div>
-        </div>
-        <nav className="ml-auto flex flex-wrap gap-1 rounded-full border border-border bg-white p-1">
-          {tabs.map((t) => (
-            <Link key={t.href} href={t.href} className="rounded-full px-4 py-2 text-[13px] font-bold text-heading hover:bg-bg">
-              {t.label}
-            </Link>
-          ))}
-        </nav>
+    <div className="flex min-h-screen bg-bg">
+      <AdminSidebar permissions={permissions} />
+      <div className="min-w-0 flex-1">
+        <AdminTopbar
+          fullName={session.user.fullName ?? session.user.username ?? "Admin"}
+          roleName={session.user.roleName ?? ""}
+          pendingCount={kpis.pending}
+          todayCount={kpis.today}
+        />
+        <main className="p-5 sm:p-7">{children}</main>
       </div>
-      {children}
     </div>
   );
 }

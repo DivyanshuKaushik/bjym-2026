@@ -1,15 +1,17 @@
 /**
- * One-time script to create the Master Admin auth user + profile.
+ * One-time script to create the Master Admin account directly in the
+ * `admin_users` table (bcrypt-hashed password — no Supabase Auth involved).
  *
  * Usage:
- *   1. Make sure .env.local has NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+ *   1. Make sure .env.local has SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
  *   2. Run: npm run create-admin
  *
- * This uses the Supabase service role key (server-only, never expose to client)
- * to create the auth user directly (bypassing email confirmation) and marks
- * the profiles.role as 'admin'.
+ * Equivalent to running supabase/seed.sql, provided as a convenience for
+ * people who'd rather not use the Supabase CLI directly. Safe to re-run
+ * (upserts by username).
  */
 import { createClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
 import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -30,63 +32,44 @@ if (existsSync(envPath)) {
   }
 }
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@bjymcg.local";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "divyanshukaushik";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "bjym2026";
-const ADMIN_NAME = process.env.ADMIN_NAME || "divyanshukaushik";
+const ADMIN_NAME = process.env.ADMIN_NAME || "Divyanshu Kaushik";
 
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
+  console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-  auth: { autoConfirm: true, persistSession: false },
-});
+const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
 async function main() {
-  console.log(`Creating Master Admin: ${ADMIN_EMAIL} ...`);
+  console.log(`Creating Master Admin: ${ADMIN_USERNAME} ...`);
 
-  const { data: created, error: createError } = await supabase.auth.admin.createUser({
-    email: ADMIN_EMAIL,
-    password: ADMIN_PASSWORD,
-    email_confirm: true,
-    user_metadata: { full_name: ADMIN_NAME, role: "admin" },
-  });
-
-  let userId = created?.user?.id;
-
-  if (createError) {
-    if (createError.message?.toLowerCase().includes("already")) {
-      console.log("Admin user already exists — fetching existing user...");
-      const { data: list } = await supabase.auth.admin.listUsers();
-      const existing = list?.users?.find((u) => u.email === ADMIN_EMAIL);
-      userId = existing?.id;
-    } else {
-      console.error("Error creating admin user:", createError.message);
-      process.exit(1);
-    }
-  }
-
-  if (!userId) {
-    console.error("Could not resolve admin user id.");
+  const { data: role, error: roleError } = await supabase.from("roles").select("id").eq("name", "MASTER_ADMIN").single();
+  if (roleError || !role) {
+    console.error("MASTER_ADMIN role not found — run the migrations (000001, 000012) first.");
     process.exit(1);
   }
 
-  const { error: profileError } = await supabase
-    .from("profiles")
-    .update({ role: "admin", full_name: ADMIN_NAME })
-    .eq("id", userId);
+  const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
 
-  if (profileError) {
-    console.error("Error updating profile role:", profileError.message);
+  const { error } = await supabase
+    .from("admin_users")
+    .upsert(
+      { username: ADMIN_USERNAME, password_hash: passwordHash, full_name: ADMIN_NAME, role_id: role.id, is_active: true },
+      { onConflict: "username" }
+    );
+
+  if (error) {
+    console.error("Error creating admin user:", error.message);
     process.exit(1);
   }
 
   console.log("✅ Master Admin ready.");
-  console.log(`   Email:    ${ADMIN_EMAIL}`);
+  console.log(`   Username: ${ADMIN_USERNAME}`);
   console.log(`   Password: ${ADMIN_PASSWORD}`);
   console.log("   Login at: /admin-login");
 }

@@ -9,10 +9,12 @@ export function DownloadCardButtons({
   cardRef,
   fileName,
   labels,
+  onDownloaded,
 }: {
   cardRef: React.RefObject<HTMLDivElement | null>;
   fileName: string;
   labels: { png: string; pdf: string };
+  onDownloaded?: () => void;
 }) {
   const [busy, setBusy] = useState<"png" | "pdf" | null>(null);
 
@@ -31,6 +33,7 @@ export function DownloadCardButtons({
       a.href = dataUrl;
       a.download = `${fileName}.png`;
       a.click();
+      onDownloaded?.();
     } finally {
       setBusy(null);
     }
@@ -43,12 +46,13 @@ export function DownloadCardButtons({
       if (!dataUrl || !cardRef.current) return;
       const rect = cardRef.current.getBoundingClientRect();
       const pdf = new jsPDF({
-        orientation: "landscape",
+        orientation: rect.height >= rect.width ? "portrait" : "landscape",
         unit: "px",
         format: [rect.width, rect.height],
       });
       pdf.addImage(dataUrl, "PNG", 0, 0, rect.width, rect.height);
       pdf.save(`${fileName}.pdf`);
+      onDownloaded?.();
     } finally {
       setBusy(null);
     }

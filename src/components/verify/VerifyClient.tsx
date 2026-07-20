@@ -1,32 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { useLang } from "@/lib/i18n/LanguageProvider";
+import { verifyMembership } from "@/app/actions/public";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Chakra } from "@/components/common/Chakra";
 import { Avatar } from "@/components/common/Avatar";
-import type { VerifyResult } from "@/lib/types";
-import { formatDate } from "@/lib/utils";
+import { Chakra } from "@/components/common/Chakra";
+
+type Result = Awaited<ReturnType<typeof verifyMembership>>;
 
 export function VerifyClient() {
   const { d } = useLang();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("id") ?? "");
-  const [result, setResult] = useState<VerifyResult | null | "notfound">(null);
-  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<Result>(null);
+  const [pending, startTransition] = useTransition();
 
-  const search = async (idOverride?: string) => {
-    const id = (idOverride ?? query).trim();
-    if (!id) return;
-    setLoading(true);
-    const supabase = createClient();
-    const { data } = await supabase.rpc("verify_membership", { p_membership_id: id });
-    setResult(data && data.length > 0 ? (data[0] as VerifyResult) : "notfound");
-    setLoading(false);
+  const search = (idOverride?: string) => {
+    const id = idOverride ?? query;
+    if (!id.trim()) return;
+    startTransition(async () => setResult(await verifyMembership(id)));
   };
 
   useEffect(() => {
@@ -34,6 +30,8 @@ export function VerifyClient() {
     if (id) search(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const statusTone = (status: string) => (status === "Active" ? "success" : status === "Suspended" ? "warning" : "danger");
 
   return (
     <div className="mx-auto max-w-[540px] animate-fadeUp">
@@ -53,9 +51,7 @@ export function VerifyClient() {
           placeholder={d.verify.placeholder}
           onKeyDown={(e) => e.key === "Enter" && search()}
         />
-        <Button variant="navy" onClick={() => search()} disabled={loading}>
-          {loading ? "…" : d.verify.button}
-        </Button>
+        <Button variant="navy" onClick={() => search()} disabled={pending}>{pending ? "…" : d.verify.button}</Button>
       </div>
 
       {result === "notfound" && (
@@ -72,22 +68,18 @@ export function VerifyClient() {
               <Chakra size={15} color="#14532D" /> {d.verify.verified}
             </div>
             <div className="flex justify-center">
-              <Avatar name={result.full_name} photo={result.photo_base64} size={88} ring="#1F6B3B" />
+              <Avatar name={result.fullName} photo={result.photoBase64} size={88} ring="#1F6B3B" />
             </div>
-            <div className="mt-3 text-xl font-black text-heading">{result.full_name}</div>
+            <div className="mt-3 text-xl font-black text-heading">{result.fullName}</div>
             <div className="mt-0.5 bg-gradient-to-r from-primary-dark to-navy bg-clip-text text-sm font-black text-transparent">
-              {result.membership_id}
+              {result.membershipId}
             </div>
             <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded-2xl bg-bg p-4 text-left text-[13px]">
-              <span>
-                <b>स्थिति:</b>{" "}
-                <Badge tone={result.status === "Active" ? "success" : result.status === "Suspended" ? "warning" : "danger"}>
-                  {result.status}
-                </Badge>
-              </span>
-              <span><b>जिला:</b> {result.district_name_hi}</span>
-              <span><b>मंडल:</b> {result.mandal_name_hi}</span>
-              <span><b>पंजीकरण:</b> {formatDate(result.joined_at)}</span>
+              <span><b>स्थिति:</b> <Badge tone={statusTone(result.status)}>{result.status}</Badge></span>
+              <span><b>सत्यापन:</b> {result.verificationStatus}</span>
+              <span><b>जिला:</b> {result.districtNameHi}</span>
+              <span><b>मंडल:</b> {result.mandalNameHi}</span>
+              <span className="col-span-2"><b>पंजीकरण:</b> {result.joinedAt}</span>
             </div>
           </div>
         </div>

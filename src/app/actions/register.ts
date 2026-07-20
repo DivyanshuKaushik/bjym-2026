@@ -1,108 +1,94 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { fullRegistrationSchema } from "@/lib/validators/registration";
-import { redirect } from "next/navigation";
+import { memberRepository } from "@/lib/repositories/member.repository";
+import { findHierarchyLabels } from "@/data/hierarchy";
+import { findLokSabhaLabel } from "@/data/loksabha";
+import { signIn } from "@/lib/auth";
+import { AuthError } from "next-auth";
 
 export type RegisterState = {
   error?: string;
   fieldErrors?: Record<string, string>;
-  needsEmailConfirmation?: boolean;
 };
 
 export async function registerMember(input: unknown): Promise<RegisterState> {
   const parsed = fullRegistrationSchema.safeParse(input);
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      fieldErrors[issue.path.join(".")] = issue.message;
-    }
+    for (const issue of parsed.error.issues) fieldErrors[issue.path.join(".")] = issue.message;
     return { error: "कृपया फॉर्म की जानकारी जांचें", fieldErrors };
   }
-
   const data = parsed.data;
-  const supabase = await createClient();
 
-  // 1. Create the auth user. If "Confirm email" is enabled in the Supabase
-  //    project (the default for new projects), signUp() succeeds but does
-  //    NOT return an active session — the user isn't "logged in" until they
-  //    click the confirmation link. That's fine; we don't need a session to
-  //    finish registration.
-  const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-    email: data.email,
-    password: data.password,
-    options: {
-      data: { full_name: data.fullName, role: "member" },
-    },
-  });
+  const { mobileTaken, emailTaken } = await memberRepository.mobileOrEmailExists(data.mobile, data.email);
+  if (mobileTaken) return { error: "यह मोबाइल नंबर पहले से पंजीकृत है", fieldErrors: { mobile: "पहले से पंजीकृत है" } };
+  if (emailTaken) return { error: "यह ईमेल पहले से पंजीकृत है", fieldErrors: { email: "पहले से पंजीकृत है" } };
 
-  if (signUpError || !signUpData.user) {
-    return { error: signUpError?.message || "खाता बनाने में त्रुटि हुई। कृपया दोबारा प्रयास करें।" };
+  const labels = findHierarchyLabels(data.districtId, data.assemblyId, data.mandalId);
+  if (!labels.district || !labels.assembly || !labels.mandal) {
+    return { error: "चयनित क्षेत्र मान्य नहीं है, कृपया दोबारा चुनें" };
   }
 
-  const userId = signUpData.user.id;
-  const hasSession = !!signUpData.session;
-
-  // 2 & 3. Use the service-role (admin) client for the referral lookup and the
-  //    membership insert. This is a deliberate, trusted server-side write —
-  //    we set profile_id ourselves from the just-created auth user, the input
-  //    was already Zod-validated above, and this is the ONE place a brand-new
-  //    user (who may not have an active session yet, per the email-confirmation
-  //    note above) needs to create their own membership row. Bypassing RLS
-  //    here — rather than depending on an auth.uid() that may not exist yet —
-  //    is what makes registration work in both configurations. Every other
-  //    read/write in the app still goes through the normal RLS-protected
-  //    client, so this doesn't weaken security elsewhere.
-  const admin = createAdminClient();
-
-  let referredByCode: string | null = null;
-  if (data.referralCode && data.referralCode.trim()) {
-    const { data: referrer } = await admin
-      .from("memberships")
-      .select("referral_code")
-      .eq("referral_code", data.referralCode.trim().toUpperCase())
-      .maybeSingle();
-    referredByCode = referrer?.referral_code ?? null;
+  const loksabhaLabel = findLokSabhaLabel(data.loksabhaId);
+  if (!loksabhaLabel) {
+    return { error: "चयनित लोकसभा क्षेत्र मान्य नहीं है, कृपया दोबारा चुनें" };
   }
 
-  const { error: insertError } = await admin.from("memberships").insert({
-    profile_id: userId,
+  const dob = `${data.dobYear}-${data.dobMonth}-${data.dobDay}`;
+  const mpinHash = await memberRepository.hashMpin(data.mpin);
+
+  const { member, error } = await memberRepository.create({
     photo_base64: data.photoBase64,
     full_name: data.fullName,
     father_name: data.fatherName,
-    dob: data.dob,
+    dob,
     gender: data.gender,
-    phone: data.phone,
+    category: data.category,
+    jaati: data.jaati,
+    mobile: data.mobile,
+    whatsapp: data.whatsappSameAsMobile ? data.mobile : data.whatsapp,
     email: data.email,
+    loksabha_id: data.loksabhaId,
+    loksabha_name_en: loksabhaLabel.en,
+    loksabha_name_hi: loksabhaLabel.hi,
+    district_id: data.districtId,
+    district_name_en: labels.district.en,
+    district_name_hi: labels.district.hi,
+    assembly_id: data.assemblyId,
+    assembly_name_en: labels.assembly.en,
+    assembly_name_hi: labels.assembly.hi,
+    mandal_id: data.mandalId,
+    mandal_name_en: labels.mandal.en,
+    mandal_name_hi: labels.mandal.hi,
+    booth: data.booth || null,
     address: data.address,
     pincode: data.pincode,
-    district_id: data.districtId,
-    assembly_id: data.assemblyId,
-    mandal_id: data.mandalId,
-    booth: data.booth,
-    whatsapp: data.whatsapp,
-    facebook: data.facebook || null,
-    instagram: data.instagram || null,
-    twitter: data.twitter || null,
-    referred_by_code: referredByCode,
+    mpin_hash: mpinHash,
+    registration_source: "web",
   });
 
-  if (insertError) {
-    // Roll back the orphaned auth user so the person can retry with the same
-    // email/phone instead of getting stuck with an account that has no membership.
-    await admin.auth.admin.deleteUser(userId).catch(() => {});
-    if (insertError.message.includes("phone")) return { error: "यह मोबाइल नंबर पहले से पंजीकृत है" };
-    if (insertError.message.includes("email")) return { error: "यह ईमेल पहले से पंजीकृत है" };
-    return { error: insertError.message };
+  if (error || !member) {
+    if (error?.includes("mobile")) return { error: "यह मोबाइल नंबर पहले से पंजीकृत है" };
+    if (error?.includes("email")) return { error: "यह ईमेल पहले से पंजीकृत है" };
+    return { error: error || "पंजीकरण में त्रुटि हुई। कृपया दोबारा प्रयास करें।" };
   }
 
-  if (!hasSession) {
-    // No session yet — email confirmation is required by the project's Auth
-    // settings. Don't redirect to /dashboard (there's no logged-in user);
-    // tell the person to confirm their email and then log in.
-    return { needsEmailConfirmation: true };
+  try {
+    await signIn("member", {
+      identifier: data.mobile,
+      mpin: data.mpin,
+      remember: "true",
+      redirectTo: "/dashboard",
+    });
+  } catch (err) {
+    if (err instanceof AuthError) {
+      // Registration succeeded but auto-login failed for some reason —
+      // send them to /login instead of leaving them stuck.
+      return { error: "पंजीकरण सफल रहा। कृपया /login पर जाकर लॉगिन करें।" };
+    }
+    throw err; // NEXT_REDIRECT — let it propagate
   }
 
-  redirect("/dashboard");
+  return {};
 }

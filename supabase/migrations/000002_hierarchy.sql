@@ -1,0 +1,30 @@
+-- =====================================================================
+-- 000002_hierarchy.sql
+--
+-- INTENTIONALLY EMPTY (no tables created here).
+--
+-- Per project requirements, the District -> Assembly -> Mandal
+-- organizational hierarchy is NOT stored in Supabase. It lives in the
+-- Next.js codebase at:
+--
+--     src/data/hierarchy.ts
+--
+-- generated directly from the official BJYM organizational-districts
+-- Excel sheet (36 districts, 102 assemblies, 479 mandals), so it can be
+-- edited/regenerated and redeployed without a database migration. Only
+-- the member's SELECTED values (id + English/Hindi name snapshots) are
+-- stored on the `members` row — see 000004_members.sql, columns
+-- `district_id/name_en/name_hi`, `assembly_id/name_en/name_hi`, etc.
+--
+-- NOTE: there is deliberately no Lok Sabha level. The source Excel sheet
+-- has no Lok Sabha column, and BJYM's organizational districts (e.g.
+-- भिलाई as distinct from दुर्ग, रायपुर शहर/ग्रामीण split) don't map 1:1
+-- onto the 11 official Lok Sabha constituencies without a separately
+-- verified mapping — so none was fabricated. District is the top level.
+--
+-- This file exists purely to preserve the migration numbering scheme
+-- and to document the decision for anyone reading the migrations folder
+-- top-to-bottom.
+-- =====================================================================
+
+select 1; -- no-op

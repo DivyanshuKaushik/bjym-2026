@@ -1,0 +1,26 @@
+project_id = "bjym-cg-membership-portal"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+# Supabase Auth is intentionally NOT used by this app (see README —
+# authentication is handled entirely by NextAuth/Auth.js). The [auth]
+# block is left at CLI defaults and disabled below purely to avoid
+# spinning up unused services during local `supabase start`.
+[auth]
+enabled = false
+
+[storage]
+enabled = false

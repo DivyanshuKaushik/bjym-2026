@@ -51,7 +51,7 @@ export const dictionary: Record<Locale, Dict> = {
     cta: { title: "आज ही जुड़ें — युवा शक्ति को राष्ट्र शक्ति बनाएँ", desc: "छत्तीसगढ़ के हर बूथ तक डिजिटल संगठन।", button: "अभी पंजीकरण करें" },
     register: {
       title: "सदस्यता पंजीकरण", subtitle: "Form submit करते ही आपका Digital ID Card तुरंत generate होगा",
-      step1: "व्यक्तिगत विवरण", step2: "निर्वाचन विवरण", step3: "सोशल विवरण", step4: "पासवर्ड",
+      step1: "व्यक्तिगत विवरण", step2: "निर्वाचन विवरण", step3: "सुरक्षा", step4: "सुरक्षा",
       fullName: "पूरा नाम", fatherName: "पिता / पति का नाम", dob: "जन्मतिथि", gender: "लिंग",
       phone: "मोबाइल नंबर", email: "ईमेल आईडी", address: "स्थायी पता", pincode: "पिनकोड",
       district: "जिला", assembly: "विधानसभा", mandal: "मंडल", booth: "बूथ",
@@ -95,7 +95,7 @@ export const dictionary: Record<Locale, Dict> = {
     cta: { title: "Join today — turn Youth Power into Nation's Power", desc: "Digital organization to every booth in Chhattisgarh.", button: "Register Now" },
     register: {
       title: "Membership Registration", subtitle: "Your Digital ID Card is generated instantly on submit",
-      step1: "Personal Details", step2: "Electoral Details", step3: "Social Details", step4: "Password",
+      step1: "Personal Details", step2: "Electoral Details", step3: "Security", step4: "Security",
       fullName: "Full Name", fatherName: "Father / Husband Name", dob: "Date of Birth", gender: "Gender",
       phone: "Mobile Number", email: "Email Address", address: "Permanent Address", pincode: "Pincode",
       district: "District", assembly: "Assembly", mandal: "Mandal", booth: "Booth",

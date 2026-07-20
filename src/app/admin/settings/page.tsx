@@ -1,18 +1,16 @@
-import { createClient } from "@/lib/supabase/server";
+import { settingsRepository } from "@/lib/repositories/settings.repository";
 import { SettingsForm } from "@/components/admin/SettingsForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminSettingsPage() {
-  const supabase = await createClient();
-  const { data: settings } = await supabase.from("settings").select("key,value");
-  const get = (k: string) => (settings?.find((s) => s.key === k)?.value as string) || "";
-
+  const settings = await settingsRepository.getAll();
   return (
     <SettingsForm
-      signatoryName={get("signatory_name")}
-      signatoryTitleHi={get("signatory_title_hi")}
-      portalNameHi={get("portal_name_hi")}
+      signatoryName={(settings.signatory_name as string) || ""}
+      signatoryTitleHi={(settings.signatory_title_hi as string) || ""}
+      portalNameHi={(settings.portal_name_hi as string) || ""}
+      portalWebsite={(settings.portal_website as string) || ""}
     />
   );
 }

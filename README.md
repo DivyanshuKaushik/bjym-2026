@@ -1,186 +1,553 @@
-# BJYM Chhattisgarh — Digital Membership Portal
+# BJYM Chhattisgarh — Digital Membership Portal (v3)
 
-Next.js 15 (App Router) + TypeScript + TailwindCSS + Supabase (Auth, PostgreSQL, RLS).
+Next.js 15 (App Router) + TypeScript + TailwindCSS + **Auth.js (NextAuth v5)**
++ Supabase (PostgreSQL only — **not** Supabase Auth).
 
-## 1. Create a Supabase project
+This is a ground-up refactor of the previous version: authentication moved
+off Supabase Auth entirely (no MAU limits), members log in with
+**mobile/email + MPIN** instead of a password, the org hierarchy moved out
+of the database into code, and the admin side got real RBAC (Master Admin
+vs Supervisor) plus an export module.
 
-1. Go to https://supabase.com → New Project.
-2. Wait for it to finish provisioning.
-3. Go to **Project Settings → API** and copy:
-   - Project URL
-   - `anon` `public` key
-   - `service_role` key (keep this secret!)
+---
 
-## 2. Configure environment variables
+## 1. Architecture at a glance
 
-Copy `.env.example` to `.env.local` and fill in your values:
+- **Auth**: Auth.js v5, JWT session strategy, HTTP-only cookies. Two
+  Credentials providers — `member` (mobile/email + MPIN) and `admin`
+  (username + password). No Supabase Auth anywhere.
+- **Database**: Supabase PostgreSQL, accessed **only** via the service-role
+  key from server-side code (`src/lib/db/client.ts`). The browser never
+  talks to Supabase directly. Authorization is enforced in the app layer
+  (NextAuth session + RBAC checks), not in Postgres RLS — RLS is enabled
+  with default-deny policies purely as defense-in-depth.
+- **Hierarchy**: Lok Sabha → District → Assembly → Mandal lives in
+  `src/data/hierarchy.ts` (plain TypeScript), not in the database. A
+  member's selected values are snapshotted (id + English/Hindi labels)
+  onto their `members` row at registration time.
+- **RBAC**: `roles` / `permissions` / `role_permissions` tables. An admin's
+  permission list is embedded in their JWT at login; the admin sidebar and
+  `middleware.ts` both filter/gate purely off that list.
+- **Repository layer**: every Supabase query lives in
+  `src/lib/repositories/*.repository.ts`. No component or Server Action
+  writes raw `.from(...)` queries directly.
+
+## 2. Environment variables
+
+Copy `.env.example` to `.env.local`:
 
 ```bash
 cp .env.example .env.local
 ```
 
 ```
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-ADMIN_EMAIL=admin@bjymcg.local
-ADMIN_PASSWORD=bjym2026
-ADMIN_NAME=divyanshukaushik
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key   # server-only, never exposed to the browser
+
+AUTH_SECRET=replace-with-a-random-32-byte-secret   # generate: npx auth secret
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
+
+ADMIN_USERNAME=divyanshukaushik
+ADMIN_PASSWORD=bjym2026
+ADMIN_NAME=Divyanshu Kaushik
 ```
 
-> Change `ADMIN_EMAIL` / `ADMIN_PASSWORD` before running the admin creation
-> script if you don't want the sample defaults.
+There is **no** `NEXT_PUBLIC_SUPABASE_ANON_KEY` in this version — the
+browser has no Supabase client at all.
 
-## 3. Run the one-time database migration
+## 3. Database setup
 
-1. Open your Supabase project → **SQL Editor → New query**.
-2. Paste the entire contents of `supabase/migrations/0001_init.sql`.
-3. Click **Run**.
+**Recommended: reset first, always.** Whether this is a brand-new
+Supabase project or one you've experimented with before, start every
+setup (or re-setup) attempt with the reset script — it's the single
+biggest source of migration errors otherwise (leftover tables/functions
+from a partial earlier attempt silently conflicting with a fresh run).
 
-This creates all tables (`profiles`, `memberships`, `districts`, `assemblies`,
-`mandals`, `referrals`, `membership_sequences`, `settings`, `activity_logs`),
-the `generate_membership_id()` / `generate_referral_code()` functions and
-triggers, the public `verify_membership()` RPC, all Row Level Security
-policies, and seeds a starter Chhattisgarh district/assembly/mandal hierarchy
-(extend this any time from **Admin → Hierarchy**).
+1. Create a Supabase project → **Project Settings → API** → copy the
+   Project URL and `service_role` key into `.env.local`.
+2. **Reset**: SQL Editor → New query → paste `supabase/reset.sql` → Run.
+   Safe on a brand-new project too (every `DROP` uses `IF EXISTS`).
+3. **Migrate**: either
+   - paste `supabase/run_all_migrations.sql` (all 16, in order) into a new
+     SQL Editor query and Run, **or**
+   - paste `supabase/reset_and_migrate.sql` instead of doing steps 2+3
+     separately — it's reset.sql followed by all 16 migrations in one file, **or**
+   - `npm run db:push` via the Supabase CLI (applies
+     `supabase/migrations/*.sql` in filename order automatically).
+4. Seed the default Master Admin — **either**:
+   - `npm run db:seed` (runs `supabase/seed.sql` via the Supabase CLI), **or**
+   - `npm run create-admin` (plain Node script, no CLI required)
 
-Safe to re-run — every statement uses `IF NOT EXISTS` / `OR REPLACE` /
-`ON CONFLICT DO NOTHING`.
+   Both create username `divyanshukaushik` / password `bjym2026` — **change
+   this password before going anywhere near production.**
 
-## 4. Install dependencies
+### What each migration does
+
+- `000001_initial_schema.sql` — extensions, shared `updated_at` trigger
+  fn, RBAC tables (roles/permissions/role_permissions)
+- `000002_hierarchy.sql` — intentionally a no-op (see file header —
+  hierarchy lives in code, not the DB)
+- `000003_admin_users.sql`
+- `000004_members.sql` — the core table
+- `000005_referrals.sql`
+- `000006_activity_logs.sql` — activity_logs, member_status_history,
+  export_history, settings
+- `000007_repair_legacy_tables.sql` — only does real work if this project
+  previously ran an older version of this schema (patches
+  `activity_logs`/`settings` if they exist in an old shape); a no-op on a
+  fresh project. Only *adds columns* here — it deliberately does **not**
+  create the `trg_settings_updated_at` trigger (that needs a function
+  that isn't defined until `000010_triggers.sql`; creating a trigger
+  against a not-yet-existing function was a bug in an earlier version of
+  this file, now fixed — see the file's own comment).
+- `000008_indexes.sql`
+- `000009_functions.sql` — generate_membership_id, generate_referral_code,
+  update_referral_stats, soft_delete_member, suspend_member,
+  restore_member, reset_member_mpin, log_activity
+- `000010_triggers.sql` — defines `set_settings_updated_at()` **and**
+  creates the trigger that uses it, now correctly in that order
+- `000011_rls.sql` — defense-in-depth only, see file header
+- `000012_storage.sql` — no-op (photos are base64, not Storage — see
+  file header for why, and how to switch later)
+- `000013_seed.sql` — roles, permissions, role_permissions, default
+  settings (idempotent, safe as a real migration)
+- `000014_export_jobs.sql` — background export job queue (Phase 2)
+- `000015_analytics_functions.sql` — SQL-based aggregation functions
+  for the analytics dashboard, at any table size (Phase 2)
+- `000016_loksabha.sql` — adds `loksabha_id/name_en/name_hi` back onto
+  `members` (nullable, additive — doesn't touch 000004); see §13 for why
+  Lok Sabha is a separate, independent dataset from the District/Assembly/
+  Mandal hierarchy
+
+## 4. Local development
 
 ```bash
+
 npm install
-```
-
-## 5. Create the Master Admin account
-
-```bash
-npm run create-admin
-```
-
-This uses your service-role key to create the one Master Admin auth user
-(`divyanshukaushik` / `admin@bjymcg.local` / `bjym2026` by default) and marks
-`profiles.role = 'admin'`. Log in at `/admin-login`.
-
-## 6. Run locally
-
-```bash
 npm run dev
 ```
 
-Visit http://localhost:3000
+Visit http://localhost:3000. Member registration is at `/register`, member
+login at `/login`, admin login at `/admin-login`.
 
-## 7. Deploy to Vercel
+### Database scripts (require the Supabase CLI: `npm i -g supabase`)
 
-1. Push this project to a GitHub repo.
-2. Import it in Vercel.
-3. Add the same environment variables from `.env.local` in
-   **Vercel → Project → Settings → Environment Variables**
-   (set `NEXT_PUBLIC_SITE_URL` to your production URL).
-4. Deploy.
-5. Run `npm run create-admin` once locally (pointed at the same Supabase
-   project) — it only needs to run once, not on every deploy.
+```bash
+npm run db:start           # start local Supabase (Docker)
+npm run db:stop
+npm run db:reset           # re-applies all migrations + supabase/seed.sql
+npm run db:push            # push local migrations to your linked remote project
+npm run db:pull            # pull remote schema down
+npm run db:migrate         # apply pending migrations
+npm run db:seed            # run supabase/seed.sql against the linked project
+npm run db:lint
+npm run db:status
+npm run db:generate-types  # regenerate src/types/database.ts from the linked project
+```
 
----
+`src/types/database.ts` is currently hand-authored (documented at the top
+of the file) so the project type-checks without a live project linked. Run
+`db:generate-types` once you've linked your real project to get the
+authoritative version.
 
-## What's implemented
+## 5. Authentication flow
 
-- **Auth**: Supabase Auth email+password for members, separate `/admin-login`
-  gated by `profiles.role = 'admin'`. Forgot/reset password flows.
-- **Registration**: 4-step form (Personal → Electoral → Social → Password),
-  Zod-validated, dependent District → Assembly → Mandal dropdowns loaded live
-  from Supabase, photo captured client-side (drag-drop, auto-cropped to a
-  square, compressed to a JPEG data URL) and stored directly on the
-  `memberships` row as `photo_base64` — **no Storage bucket needed**, per your
-  request. On submit, a Server Action creates the Auth user and the
-  membership row in one flow; the DB trigger auto-generates the
-  `BJYM-CG-{year}-{000001}` membership ID and a referral code.
-- **ID Card**: Always rendered in Hindi (per spec), with a real QR code
-  (`qrcode` package) pointing at `/verify?id=...`. Downloadable as a
-  high-resolution PNG (`html-to-image`, 3x pixel ratio) or PDF (`jspdf`) —
-  generated entirely in the browser from the on-screen component, so nothing
-  needs to be pre-rendered or stored server-side.
-- **Public verification**: `/verify` calls the `verify_membership()` Postgres
-  RPC (SECURITY DEFINER), which only exposes the limited fields needed for
-  verification — no other membership data is ever exposed to anonymous
-  users.
-- **Member dashboard**: ID card + download, referral code/link + WhatsApp/
-  Facebook/X share + referral count, profile view, change password.
-- **Admin dashboard**: Overview KPIs (real Supabase counts), Members
-  (search/filter/suspend/activate/soft-delete/export CSV), Member detail
-  (full view, reset password, regenerate membership ID, referral tree),
-  Analytics (Recharts: growth, daily registrations, district-wise, gender,
-  referral leaderboard), Hierarchy management (add/remove District /
-  Assembly / Mandal), Settings (ID card signatory name/title).
-- **Security**: Row Level Security on every table; members can only read/
-  write their own profile & membership; only `profiles.role = 'admin'` can
-  write hierarchy data, suspend/delete members, or reset passwords (via a
-  service-role Server Action, never exposed to the browser); public role can
-  only call the read-only `verify_membership` RPC. Zod validation on every
-  form. Next.js middleware protects `/dashboard/*` and `/admin/*`.
-- **i18n**: Hindi (default) / English toggle via a lightweight client-side
-  dictionary (see note below), persisted to `localStorage`. Hierarchy data is
-  stored with both `name_en` and `name_hi` columns so the database stays in
-  English while the UI displays the selected language, per your `language`
-  spec.
+**Members** (`/login`, `/register`):
+- Register → 3-step form → Server Action creates the `members` row
+  (MPIN bcrypt-hashed, `mpin_hash` column) → auto signs in via
+  `signIn("member", { identifier, mpin, ... })` → redirect to `/dashboard`.
+- Login → mobile-or-email + 4-6 digit MPIN → same Credentials provider.
+- "Remember Me" shortens/extends the JWT's own `exp` claim (1 day
+  unchecked, 30 days checked) inside the `jwt` callback in
+  `src/lib/auth/config.ts`.
+- "Logout Everywhere" bumps `members.token_version`; `middleware.ts`
+  compares the JWT's snapshotted `tokenVersion` against the live DB value
+  on every `/dashboard/*` navigation and forces re-login on mismatch. This
+  is a per-navigation check (not instant across open tabs mid-session) —
+  documented trade-off of pure JWT auth without a server-side revocation
+  store; upgrading to instant revocation would mean adding a Redis/DB
+  denylist checked on every request, not just navigations.
 
-## Known simplifications (be aware before scaling to production traffic)
+**Admins** (`/admin-login`):
+- Username + password (bcrypt-hashed `password_hash` on `admin_users`).
+- Same "Remember Me" / "Logout Everywhere" mechanics as members, keyed off
+  `admin_users.token_version`.
+- On successful login, the JWT embeds `roleName` and the flat `permissions`
+  string array (resolved once at login from `role_permissions`) — the
+  sidebar (`AdminSidebar.tsx`) and `middleware.ts` both filter purely off
+  that array, no DB round-trip needed to render the UI.
 
-- **i18n implementation**: the spec asked for `next-intl` with locale-prefixed
-  routing. That combination adds meaningful complexity when mixed with
-  Supabase SSR auth middleware (locale-aware redirects, `generateStaticParams`,
-  etc.). This build ships a lightweight client-side dictionary/context
-  instead (`src/lib/i18n`) that satisfies the same user-facing requirement
-  (Hindi default, toggle to English, DB values stay English) with far less
-  moving parts. Swapping in `next-intl` later is a contained change limited
-  to `src/lib/i18n` and the pages that read from it.
-- **Referral "pending" count**: the spec's `referral.member` list mentions
-  "Pending Referrals," which implies tracking link clicks that don't convert.
-  That needs a separate click-tracking table/event, which wasn't built here
-  — only **joined** referrals are tracked (via the `referrals` table,
-  populated by a DB trigger). Add a `referral_clicks` table + a beacon on the
-  `/register?ref=` landing if you want true pending-vs-converted stats.
-  Photos are stored as base64 directly in `memberships.photo_base64`, per
-  your instruction to skip Storage. Fine for a portal in the tens/low
-  hundreds of thousands of members; if you later scale past that or want
-  faster table scans, migrate this column to Supabase Storage
-  (`generated-idcards` / `member-photos` buckets are already reserved in the
-  schema comments) and store a URL instead.
-- **Analytics aggregation**: computed by fetching up to 5,000 recent rows and
-  aggregating in the React component, which is fine at current scale. Past
-  ~50k+ members, replace `src/app/admin/analytics/page.tsx`'s query with a
-  SQL view / RPC that does the aggregation in Postgres.
-- **TanStack Query** is wired up (`QueryProvider` in the root layout) but most
-  data fetching here uses Server Components directly, which is the more
-  idiomatic Next.js 15 pattern and keeps RLS enforcement server-side. Use
-  TanStack Query for any client-side polling/optimistic-update features you
-  add later (e.g. a live-updating admin overview).
+## 6. RBAC architecture
 
-## Project structure
+Two seeded roles:
+
+- **MASTER_ADMIN** — every permission (see
+  `src/lib/rbac/permissions.ts` → `PERMISSIONS`): dashboard, analytics,
+  full member management, export, hierarchy view, settings, admin user
+  management, activity logs.
+- **SUPERVISOR** — created by a Master Admin. Can view members, approve/
+  reject/suspend/activate members, and reset a member's MPIN. Cannot see
+  analytics, export data, delete members, create admins, or touch settings.
+
+Enforcement happens at **three layers**, deliberately redundant:
+
+1. `middleware.ts` — blocks navigation to an `/admin/*` route the signed-in
+   admin's permission list doesn't cover (redirects to `/admin?denied=1`).
+2. Server Actions (`src/app/actions/admin.ts`, `export.ts`) — every
+   mutating action calls `requirePermission(...)` before touching the DB,
+   so even a direct fetch to the action (bypassing the UI) is rejected.
+3. `AdminSidebar.tsx` — only renders nav items the admin has permission
+   for, so the UI never shows an option they can't use.
+
+To add a new permission: add the key to `PERMISSIONS` in
+`src/lib/rbac/permissions.ts`, insert it in `000013_seed.sql`'s
+`permissions` table, map it to a role in the `role_permissions` insert
+right below, then gate the relevant Server Action / nav item with it.
+
+## 7. Data export module (Master Admin only)
+
+`/admin/export` — filters (status, verification, gender, category,
+district, referral, date range, search), a remembered column selector
+(persisted to `localStorage`, all 36 requested fields available), and
+three formats:
+
+- **CSV / Excel (.xlsx)** — complete filtered records.
+  - **≤ 3,000 matching rows** (`EXPORT_SYNC_THRESHOLD` in
+    `src/app/actions/export.ts`): built and returned inline for an instant
+    download.
+  - **> 3,000 rows**: automatically queued as a background job. A
+    `export_jobs` row is created, then `startBackgroundExport` uses
+    Next.js's `after()` API to keep fetching/appending 2,000-row pages
+    *after* the response has already returned to the browser — no
+    external queue service (Redis/Inngest/etc.) required, so this stays
+    deployable on plain Vercel + Supabase. The client polls
+    `getExportJobStatus` every 1.5s and renders a real progress bar
+    (processed/total rows); on completion, the file is available from the
+    **Background Job History** table on the same page. Capped at 500,000
+    rows (`HARD_CAP`) as a safety ceiling.
+- **PDF** — a filtered *summary* report (counts by status/gender/category),
+  computed via targeted `COUNT(*)` queries (`getExportSummary`) rather than
+  fetching any rows at all — stays fast regardless of how many members
+  match the filters, so it's never queued.
+
+Every export (sync or background) is logged to `export_history` (who,
+when, format, filters, row count) and shown in the **Export History**
+table. `export_jobs` additionally tracks per-job progress and holds the
+finished file (base64) for re-download. All export Server Actions
+re-validate the caller's `members.export` permission on every call — a
+Supervisor hitting them directly gets rejected regardless of what the UI
+shows.
+
+## 8. Analytics
+
+`/admin/analytics` is backed entirely by SQL `GROUP BY` aggregation
+(migration `000015_analytics_functions.sql`) — growth, district/category/
+gender/jaati breakdowns, and age distribution are all computed inside
+Postgres and return a handful to a few hundred summarized rows, regardless
+of whether `members` has 5,000 or 5,00,000 rows. The **Cross Filter** panel
+(District vs Category, Assembly vs Gender, Mandal vs Jaati, etc.) calls a
+`analytics_cross(x_field, y_field)` Postgres function live as you change
+the dropdowns — the two field names are validated against a hardcoded
+whitelist before being used in dynamic SQL, so it isn't a SQL-injection
+vector despite building the query with `format(%I)`.
+
+## 9. Notifications
+
+The admin topbar bell is backed by real data (no placeholder): pending-
+verification count and today's registration count, fetched once per
+admin-area page load in `src/app/admin/layout.tsx` and passed down to
+`AdminTopbar`. Clicking a notification navigates to the relevant list.
+
+## 10. ID Card
+
+`src/components/id-card/MembershipCard.tsx` uses the official BJP+BJYM
+logo you provided (`public/brand/logo.png`) and mirrors your reference
+template's layout: tricolor diagonal corner, Hindi heading, green ribbon,
+tricolor-bordered photo frame, icon+label info rows, signature block, and
+**QR bottom-left** (per your latest instruction — the reference screenshot
+didn't show one, but the brief asked for bottom-left placement). Fixed
+pixel dimensions (380×580) with `text-overflow: ellipsis` on every
+variable-length field, so long names/districts never wrap or overflow.
+Always renders in Hindi regardless of the portal's active display language,
+per spec. Downloads as a 3x-scale PNG or a matching-orientation PDF via
+`html-to-image` + `jsPDF` — both generated client-side from the exact
+on-screen component, so there's no separate server-side rendering path to
+keep in sync.
+
+## 11. Remaining known simplifications
+
+- **i18n**: a lightweight client-side Hindi/English dictionary
+  (`src/lib/i18n`) rather than full `next-intl` locale-routing — see the
+  in-code comment for why (keeps it from fighting with the auth
+  middleware). The DB-stores-English / UI-shows-selected-language rule is
+  honored via the `_name_en` / `_name_hi` columns on `members`.
+- **"Logout Everywhere"** is enforced on navigation (via middleware) rather
+  than instantly on every in-flight request mid-session — see §5. Fully
+  instant revocation would need a server-side session store checked on
+  every Server Action too, not just page loads.
+- The export hard cap (500,000 rows, §7) is a safety ceiling, not a true
+  unbounded-scale solution — beyond that, split the export by date range
+  or district and run multiple jobs.
+
+## 10. Deployment (Vercel)
+
+1. Push to GitHub, import into Vercel.
+2. Add every variable from `.env.local` to **Vercel → Project → Settings
+   → Environment Variables** (set `NEXT_PUBLIC_SITE_URL` to your real
+   domain, generate a fresh `AUTH_SECRET` for production).
+3. Deploy.
+4. Run the migrations against your production Supabase project (SQL
+   Editor, or `supabase db push` once linked) and seed the Master Admin
+   (`npm run create-admin` pointed at prod, or `db:seed`) — do this once,
+   not on every deploy.
+
+## 11. Production checklist
+
+- [ ] Change the default Master Admin password immediately after first login
+- [ ] Generate a fresh `AUTH_SECRET` for production (`npx auth secret`)
+- [ ] Set `NEXT_PUBLIC_SITE_URL` to your real domain (used in QR/referral links)
+- [ ] Review `supabase/migrations/000011_rls.sql`'s comment if you ever add
+      a second, less-trusted client to this project
+- [ ] Add a real SMTP/notification pathway if you plan to build out the
+      notification bell
+- [ ] Decide on the export background-queue upgrade (see §7) before your
+      member base is large enough that 20,000 rows stops being enough
+
+## 12. Folder structure
 
 ```
 src/
-  app/                     Routes (App Router)
-    actions/               Server Actions (register, auth, admin)
-    admin/                 Admin dashboard (overview, members, analytics, hierarchy, settings)
-    dashboard/             Member dashboard
-    login, admin-login, forgot-password, reset-password, register, verify
+  app/
+    actions/            Server Actions: login, logout, register, member, admin,
+                        export, analytics (cross-filter), public
+    admin/               Admin dashboard: overview, members, verification, analytics,
+                          export, hierarchy (read-only viewer), admins, activity-logs, settings
+    dashboard/            Member dashboard
+    login, admin-login, register, verify, privacy-policy
+    api/auth/[...nextauth]/route.ts
   components/
-    ui/                    Local shadcn-style primitives (Button, Input, Card, ...)
+    ui/                   Local shadcn-style primitives
     common/                Navbar, Footer, Chakra icon, language switcher
     id-card/               MembershipCard, QR code, download buttons
-    forms/                 Registration wizard, photo dropzone
-    dashboard/, admin/, verify/, home/   Feature-specific client components
+    forms/                 RegisterWizard, PhotoCropper (crop/zoom/rotate/WebP)
+    admin/                 Sidebar, Topbar, MembersTable, MemberDetailClient,
+                            VerificationQueue, AnalyticsCharts, AdminUsersClient,
+                            HierarchyManager (read-only), SettingsForm, export/ExportClient
+  data/
+    hierarchy.ts           District -> Assembly -> Mandal (static, generated from the
+                            official BJYM organizational-districts Excel sheet)
+    dob.ts                 DOB dropdown data, 18-40 age validation helpers
   lib/
-    supabase/              client.ts (browser), server.ts (SSR), middleware.ts, admin.ts (service role)
-    validators/             Zod schemas
-    i18n/                   Hindi/English dictionary + provider
-    types.ts, utils.ts
-supabase/migrations/0001_init.sql   One-time DB migration (tables, functions, triggers, RLS, seed data)
-scripts/create-admin.mjs            One-time Master Admin creation script
+    auth/                  NextAuth config (config.ts, index.ts), password.ts (bcrypt)
+    db/client.ts            The one Supabase client (service role, server-only)
+    repositories/            member, admin, referral, settings, activity, export (incl. job queue)
+    rbac/permissions.ts      Permission constants, admin nav definitions
+    validators/               Zod schemas: registration, auth, member, admin, settings
+    export/columns.ts         Export column definitions (all 36 requested fields)
+    image/cropImage.ts         Canvas crop/rotate/resize utility
+    i18n/                     Hindi/English dictionary + provider
+  types/database.ts           Hand-authored DB types (see §3 re: db:generate-types)
+supabase/
+  migrations/000001..000016.sql
+  seed.sql                    Default Master Admin (pgcrypto bcrypt, matches bcryptjs)
+  config.toml
+scripts/create-admin.mjs      Node alternative to `db:seed` for the Master Admin
 ```
 
+---
+
+## 13. Phase 3 — Homepage, mobile-first, hierarchy from real data, SEO, branding
+
+### Fresh installation guide (quick start)
+
+```bash
+git clone <your-repo> && cd bjym-portal
+npm install
+cp .env.example .env.local        # fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AUTH_SECRET
+
+# 1. Reset (SQL Editor -> paste supabase/reset.sql -> Run) — safe even on a brand-new project
+# 2. Migrate: paste supabase/run_all_migrations.sql into SQL Editor, OR:
+npm run db:push                   # applies all 16 migrations in filename order
+# ...or do both 1+2 in one paste: supabase/reset_and_migrate.sql
+
+npm run db:seed                   # or: npm run create-admin
+npm run dev
+```
+
+Migrations 000001-000006 and 000008-000016 always do real work.
+`000007_repair_legacy_tables.sql` only matters if this Supabase project
+previously ran an older version of this schema (patches
+`activity_logs`/`settings` if they're in an old shape) — it's a no-op on
+a project that's never seen this schema before.
+
+### Organizational hierarchy — real data, Lok Sabha kept independent
+
+`src/data/hierarchy.ts` is generated directly from the official BJYM
+organizational-districts Excel sheet: **36 districts, 102 assemblies, 479
+mandals**, verbatim. District is the top level of *this* file — the
+source Excel has no Lok Sabha column, and BJYM's organizational districts
+(e.g. भिलाई as distinct from दुर्ग, रायपुर शहर/ग्रामीण split) don't map
+1:1 onto the 11 official Lok Sabha constituencies without a separately
+verified assembly-level mapping.
+
+Per your follow-up, Lok Sabha is back — as a **deliberately independent**
+dataset:
+
+- `src/data/loksabha.ts` — a flat list of the 11 Chhattisgarh Lok Sabha
+  constituencies (id + English/Hindi names), with **no link into**
+  `hierarchy.ts`. It's not nested under District, and District/Assembly/
+  Mandal don't filter or get filtered by it.
+- On the registration form (Electoral step), Lok Sabha is its own
+  dropdown, selected independently of District — picking one doesn't
+  gate or reset the other.
+- `members.loksabha_id/name_en/name_hi` are back (migration
+  `000016_loksabha.sql`, additive/nullable — doesn't touch 000004), shown
+  again on the member dashboard, admin member detail, and export columns.
+- **You said you'll add your own data here.** The 11 seat names currently
+  in `loksabha.ts` are the standard public list (Sarguja, Raigarh,
+  Janjgir-Champa, Korba, Bilaspur, Rajnandgaon, Durg, Raipur, Mahasamund,
+  Kanker, Bastar) — replace/edit that array with whatever you provide;
+  nothing else needs to change since no other file depends on its
+  contents beyond `id`/`nameEn`/`nameHi`.
+
+To regenerate `hierarchy.ts` after an updated Excel sheet: read the
+sheet's जिला/विधानसभा/मण्डल columns, group into District → Assembly →
+Mandal, assign stable `d{n}-a{n}-m{n}` ids, and emit the `HIERARCHY`
+array (ask your dev/AI assistant to redo this any time the sheet changes
+— it's a mechanical transform).
+
+### Homepage
+
+`src/components/home/HomeClient.tsx` now has, top to bottom: a fixed hero
+banner (logo + headline + CTA + live stats, mobile-optimized with
+stacked full-width buttons under `sm:`), the campaign slides carousel,
+and a CTA band. `src/components/home/CampaignCarousel.tsx` is a
+from-scratch carousel (no external dependency) using the 6 provided
+slide images: autoplay every 2s, infinite loop (modulo wraparound — a
+deliberate simplification over seamless-clone infinite scroll, invisible
+at this slide count/speed), swipe support via touch handlers, pause on
+hover/touch/interaction with a 5s auto-resume, `next/image` with
+`priority` on the first slide and lazy-loading on the rest.
+
+No separate "hero/banner" image was included in the last upload (only
+the 6 slides) — the hero section reuses the clean gradient + logo
+treatment from before rather than a dedicated banner asset. Send one over
+if you have a specific banner and it's a one-line swap in `HomeClient.tsx`.
+
+### Navbar & language switcher
+
+Fully rebuilt (`src/components/common/Navbar.tsx`): official logo + bilingual
+org name on the left (switches between Hindi/English based on the active
+language), sticky with `env(safe-area-inset-top)` padding for notched
+phones, desktop pill nav, and a proper mobile hamburger menu (slide-down
+panel, body-scroll-locked while open, closes on route change). The
+language switcher (`LanguageSwitcher.tsx`) is now a sliding segmented
+toggle (हिन्दी / EN) instead of a plain dropdown — selection persists via
+`localStorage` (unchanged from before).
+
+### Membership ID — unlimited length, confirmed
+
+`generate_membership_id()` (migration `000009_functions.sql`) already
+handled unlimited growth correctly — Postgres's `lpad()` only *pads up to*
+a minimum width, it never truncates, so serial `1000000` naturally
+produces `BJYM-CG-2026-1000000` with no code change needed. What *was*
+missing: the ID card could visually overflow once IDs grew past 6 digits.
+Fixed in `MembershipCard.tsx` — the membership ID now shrinks its own font
+size in three steps as the string gets longer (never truncates an
+identifier people need to read), so `BJYM-CG-2026-999999` and
+`BJYM-CG-2026-12345678` both render cleanly on one line.
+
+### SEO, favicons, manifest, structured data
+
+- `src/app/layout.tsx`: full `Metadata` API — title template, description,
+  keywords, canonical, Open Graph, Twitter card (`summary_large_image`),
+  JSON-LD (`Organization` + `WebSite` + `WebPage` + `BreadcrumbList`) via
+  a `<script type="application/ld+json">`.
+- `src/app/icon.png`, `apple-icon.png` (Next.js App Router file-convention
+  icons — no manual `<link>` tags needed), plus `public/icons/` with
+  16/32/192/512px PNGs and a proper 1200×630 Open Graph image, all
+  generated from your official logo.
+- `src/app/manifest.ts`, `sitemap.ts`, `robots.ts` — App Router
+  file-convention routes, no extra config. `robots.ts` blocks
+  `/admin`, `/dashboard`, `/api`, `/login`, `/register`, `/admin-login`
+  from indexing, matching your list exactly — note **`/register` is
+  your main conversion page**; if you want it discoverable via search
+  (many orgs do), remove it from the `disallow` array in `robots.ts`.
+- Per-page metadata added to `/register`, `/login`, `/verify`,
+  `/privacy-policy`, `/terms-and-conditions`, `/admin-login` (noindex).
+  `/login` and `/admin-login` were split into a server `page.tsx`
+  (metadata) + a client form component, since a page can't export both
+  `"use client"` and `metadata` in the App Router.
+- Custom branded `not-found.tsx` (404) and `global-error.tsx` (500-style)
+  pages.
+
+### Images & performance
+
+The 6 slide images (originally ~14 MB total) were resized to 1600px wide
+and re-encoded as JPEG (~1.1 MB total); the logo was resized and
+recompressed (~180 KB). All slides render through `next/image` (automatic
+responsive `srcset`, lazy-loading past the first slide). This should move
+Lighthouse Performance meaningfully — a literal ≥95 score depends on your
+actual Vercel deployment's network/CPU and can't be verified from this
+environment; if you fall short after deploying, the next lever is usually
+converting `public/slides/*.jpg` to WebP/AVIF (Next.js does this
+automatically for images served through `next/image`, so this is likely
+already happening at request time on Vercel).
+
+### Mobile-first pass
+
+`globals.css` now sets a 40px minimum touch target on coarse-pointer
+devices, disables horizontal overflow at the `body` level as a safety
+net, and (via `Input`/`Select`/`Textarea` using `text-base sm:text-sm`)
+uses 16px form-field text on mobile — below 16px, iOS Safari
+auto-zooms on focus, which is a common source of "broken-feeling" mobile
+forms. The hero/CTA sections on the homepage now stack to full-width
+buttons under `sm:`. This pass covered the highest-traffic public surfaces
+(home, navbar, forms); a few lower-traffic admin screens (some analytics
+chart cards, dense tables) still rely on horizontal scroll on very narrow
+viewports rather than a bespoke mobile layout — functional, but not yet
+redesigned card-per-row on mobile. Flag any specific screen that's still
+rough and it's a contained fix.
+
+```
+
+## 14. Phase 4 — hero banner, footer contact/socials, migration fix
+
+- **Hero banner**: `public/hero-banner.jpg` is your uploaded "Join BJYM
+  2026" cover image (resized to 1920px wide, re-encoded JPEG, ~1.35 MB →
+  ~310 KB). The homepage hero now shows it full-width via `next/image`
+  (`priority` load, responsive `sizes="100vw"`) with a subtle bottom
+  gradient, followed by the H1/CTA/stats block below it (kept separate
+  rather than overlaid, since the banner already has its own baked-in
+  text — avoids double text clutter).
+- **Footer contact & socials**: real phone (`9109881465`), email
+  (`bjym4cg@gmail.com`), and working links to your Facebook, Instagram,
+  and X accounts, with proper icon buttons (`lucide-react` for FB/IG, a
+  small inline SVG for X since lucide has no X glyph). The same phone/
+  email were added to the Privacy Policy and Terms & Conditions contact
+  sections for consistency.
+- **Migration ordering bug, fixed**: `000007_repair_legacy_tables.sql`
+  was creating the `trg_settings_updated_at` trigger immediately, but the
+  function it points at (`set_settings_updated_at()`) wasn't defined until
+  `000010_triggers.sql` — `CREATE TRIGGER` (unlike a function body) needs
+  the target procedure to already exist, so this failed with
+  `function public.set_settings_updated_at() does not exist`. Fixed by
+  having `000007` only add the missing columns; `000010` still creates
+  the function *and* the trigger together, in the correct order, exactly
+  as before. Every other migration was re-audited for the same class of
+  bug (a function/trigger call before its definition) — none found.
+- **`supabase/reset.sql`** (new): drops every table and function this
+  project creates, `IF EXISTS`/`CASCADE` throughout, safe to run on a
+  brand-new project or a previously-used one. Also drops legacy
+  pre-refactor table/function names in case this Supabase project was
+  used for an earlier version. Run this before migrating any time you
+  want a guaranteed-clean start.
+- **`supabase/reset_and_migrate.sql`** (new): `reset.sql` + all 16
+  migrations concatenated into one paste, for a single-step setup.
+- **`npm run db:reset-remote`** (new script): runs `reset.sql` against
+  your linked *remote* project via the Supabase CLI — `supabase db
+  reset` (the pre-existing `db:reset` script) only resets a *local*
+  Supabase instance started with `supabase start`, which isn't what most
+  people running `db:push` against a hosted project actually want.
+
 Built by Techxos · techxos.in
-# bjym-2026

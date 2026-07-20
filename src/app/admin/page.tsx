@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { memberRepository } from "@/lib/repositories/member.repository";
+import { referralRepository } from "@/lib/repositories/referral.repository";
 import { Card, CardContent } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
@@ -18,55 +19,44 @@ function KPI({ label, value, icon }: { label: string; value: number | string; ic
 }
 
 export default async function AdminOverviewPage() {
-  const supabase = await createClient();
-
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const weekAgo = new Date(Date.now() - 7 * 86400000);
-  const monthAgo = new Date(Date.now() - 30 * 86400000);
-
-  const [
-    total, todayCount, week, month, active, suspended, deleted,
-    districts, assemblies, mandals, referralsCount, male, female, other,
-  ] = await Promise.all([
-    supabase.from("memberships").select("*", { count: "exact", head: true }),
-    supabase.from("memberships").select("*", { count: "exact", head: true }).gte("joined_at", todayStart.toISOString()),
-    supabase.from("memberships").select("*", { count: "exact", head: true }).gte("joined_at", weekAgo.toISOString()),
-    supabase.from("memberships").select("*", { count: "exact", head: true }).gte("joined_at", monthAgo.toISOString()),
-    supabase.from("memberships").select("*", { count: "exact", head: true }).eq("status", "Active"),
-    supabase.from("memberships").select("*", { count: "exact", head: true }).eq("status", "Suspended"),
-    supabase.from("memberships").select("*", { count: "exact", head: true }).eq("status", "Deleted"),
-    supabase.from("districts").select("*", { count: "exact", head: true }),
-    supabase.from("assemblies").select("*", { count: "exact", head: true }),
-    supabase.from("mandals").select("*", { count: "exact", head: true }),
-    supabase.from("referrals").select("*", { count: "exact", head: true }),
-    supabase.from("memberships").select("*", { count: "exact", head: true }).eq("gender", "Male"),
-    supabase.from("memberships").select("*", { count: "exact", head: true }).eq("gender", "Female"),
-    supabase.from("memberships").select("*", { count: "exact", head: true }).eq("gender", "Other"),
-  ]);
-
-  const totalCount = total.count ?? 0;
-  const conversionPct = totalCount > 0 ? (((referralsCount.count ?? 0) / totalCount) * 100).toFixed(1) : "0.0";
+  const [kpis, leaderboard] = await Promise.all([memberRepository.kpis(), referralRepository.leaderboard(5)]);
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <KPI label="Total Members" value={totalCount} icon="👥" />
-        <KPI label="Today" value={todayCount.count ?? 0} icon="⚡" />
-        <KPI label="This Week" value={week.count ?? 0} icon="📈" />
-        <KPI label="This Month" value={month.count ?? 0} icon="🗓️" />
-        <KPI label="Active" value={active.count ?? 0} icon="✅" />
-        <KPI label="Suspended" value={suspended.count ?? 0} icon="⏸️" />
-        <KPI label="Deleted" value={deleted.count ?? 0} icon="🗑️" />
-        <KPI label="Districts" value={districts.count ?? 0} icon="🏛️" />
-        <KPI label="Assemblies" value={assemblies.count ?? 0} icon="🗳️" />
-        <KPI label="Mandals" value={mandals.count ?? 0} icon="📍" />
-        <KPI label="Total Referrals" value={referralsCount.count ?? 0} icon="🔗" />
-        <KPI label="Referral Conversion" value={`${conversionPct}%`} icon="🎯" />
-        <KPI label="Male Members" value={male.count ?? 0} icon="👨" />
-        <KPI label="Female Members" value={female.count ?? 0} icon="👩" />
-        <KPI label="Other" value={other.count ?? 0} icon="🧑" />
+        <KPI label="Total Members" value={kpis.total} icon="👥" />
+        <KPI label="Today" value={kpis.today} icon="⚡" />
+        <KPI label="This Week" value={kpis.week} icon="📈" />
+        <KPI label="This Month" value={kpis.month} icon="🗓️" />
+        <KPI label="Active" value={kpis.active} icon="✅" />
+        <KPI label="Suspended" value={kpis.suspended} icon="⏸️" />
+        <KPI label="Deleted" value={kpis.deleted} icon="🗑️" />
+        <KPI label="Verified" value={kpis.verified} icon="🛡️" />
+        <KPI label="Pending Verification" value={kpis.pending} icon="🕓" />
+        <KPI label="Male" value={kpis.male} icon="👨" />
+        <KPI label="Female" value={kpis.female} icon="👩" />
+        <KPI label="Other" value={kpis.other} icon="🧑" />
+        <KPI label="Referral Count" value={kpis.referralCount} icon="🔗" />
+        <KPI label="Referral Conversion" value={`${kpis.conversionPct}%`} icon="🎯" />
       </div>
+
+      <Card>
+        <CardContent>
+          <div className="mb-3 font-black text-heading">Top Referrers</div>
+          {leaderboard.length === 0 ? (
+            <div className="text-sm text-muted">अभी तक कोई referral नहीं हुआ।</div>
+          ) : (
+            <div className="grid gap-1.5">
+              {leaderboard.map((l, i) => (
+                <div key={l.membership_id} className="flex items-center justify-between border-b border-border py-2 text-[13px] last:border-0">
+                  <span className="font-bold text-heading">#{i + 1} — {l.full_name} <span className="text-muted">({l.membership_id})</span></span>
+                  <span className="rounded-full bg-secondary-light px-3 py-0.5 font-black text-secondary-dark">{l.referral_count} referrals</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

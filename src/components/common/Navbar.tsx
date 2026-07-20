@@ -2,89 +2,134 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { Menu, X } from "lucide-react";
 import { useLang } from "@/lib/i18n/LanguageProvider";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-import { createClient } from "@/lib/supabase/client";
+import { logout } from "@/app/actions/logout";
 import { cn } from "@/lib/utils";
 
-export function Navbar({ isAuthed, isAdmin }: { isAuthed: boolean; isAdmin: boolean }) {
-  const { d } = useLang();
+export function Navbar({ isAuthed, userType }: { isAuthed: boolean; userType: "member" | "admin" | null }) {
+  const { d, locale } = useLang();
   const pathname = usePathname();
   const router = useRouter();
-  const isHome = pathname === "/";
+  const [pending, startTransition] = useTransition();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close the mobile menu on route change.
+  useEffect(() => setMenuOpen(false), [pathname]);
+  // Lock body scroll while the mobile menu is open.
+  useEffect(() => {
+    document.body.style.overflow = menuOpen ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [menuOpen]);
+
+  const isAdminSection = pathname.startsWith("/admin");
+  if (isAdminSection) return null; // admin area has its own AdminShell header
 
   const navItems = [
     { href: "/", label: d.nav.home },
     { href: "/register", label: d.nav.register },
     { href: "/verify", label: d.nav.verify },
-    ...(isAdmin ? [{ href: "/admin", label: d.nav.admin }] : isAuthed ? [{ href: "/dashboard", label: d.nav.dashboard }] : [{ href: "/login", label: d.nav.login }]),
+    ...(userType === "member" ? [{ href: "/dashboard", label: d.nav.dashboard }] : userType === "admin" ? [{ href: "/admin", label: d.nav.admin }] : [{ href: "/login", label: d.nav.login }]),
   ];
 
-  const handleLogout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+  const doLogout = () => startTransition(async () => {
+    await logout();
     router.push("/");
-    router.refresh();
-  };
+  });
 
   return (
     <header
-      className={cn(
-        "sticky top-0 z-50 flex flex-wrap items-center gap-3 px-4 sm:px-8 py-3 backdrop-blur-xl border-b",
-        isHome ? "bg-[#0D1220]/70 border-white/10" : "bg-bg/85 border-border"
-      )}
+      className="sticky top-0 z-50 border-b border-border bg-bg/90 backdrop-blur-xl"
+      style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
-      <Link href="/" className="flex items-center gap-2.5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-primary-dark font-serif font-black text-white shadow-lg">
-          भा
-        </div>
-        <div>
-          <div className={cn("text-sm font-black leading-tight", isHome ? "text-white" : "text-heading")}>BJYM छत्तीसगढ़</div>
-          <div className={cn("text-[9px] font-extrabold uppercase tracking-widest", isHome ? "text-white/60" : "text-muted")}>
-            Digital Membership
+      <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-3 px-4 sm:px-8">
+        <Link href="/" className="flex min-w-0 items-center gap-2.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/logo.png" alt="BJYM Chhattisgarh" className="h-9 w-9 shrink-0 rounded-lg object-contain sm:h-10 sm:w-10" />
+          <div className="min-w-0 leading-tight">
+            <div className="truncate text-[12.5px] font-black text-heading sm:text-sm">
+              {locale === "en" ? "Bharatiya Janata Yuva Morcha" : "भारतीय जनता युवा मोर्चा"}
+            </div>
+            <div className="truncate text-[9.5px] font-extrabold uppercase tracking-widest text-muted sm:text-[10px]">
+              {locale === "en" ? "Chhattisgarh" : "छत्तीसगढ़"}
+            </div>
           </div>
-        </div>
-      </Link>
+        </Link>
 
-      <nav
+        {/* desktop nav */}
+        <nav className="ml-auto hidden items-center gap-1 rounded-full border border-border bg-white/80 p-1 md:flex">
+          {navItems.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "rounded-full px-4 py-2 text-[13px] font-bold transition-all",
+                  active ? "bg-gradient-to-br from-orange-400 to-primary-dark text-white shadow-md" : "text-heading hover:bg-bg"
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+          {isAuthed && (
+            <button onClick={doLogout} disabled={pending} className="rounded-full px-4 py-2 text-[13px] font-bold text-heading transition-all hover:bg-bg">
+              {d.nav.logout}
+            </button>
+          )}
+        </nav>
+
+        <div className="ml-auto hidden md:ml-0 md:block">
+          <LanguageSwitcher />
+        </div>
+
+        {/* mobile: hamburger */}
+        <button
+          onClick={() => setMenuOpen((o) => !o)}
+          className="ml-auto flex h-10 w-10 items-center justify-center rounded-full border border-border bg-white text-heading md:hidden"
+          aria-label={menuOpen ? "मेनू बंद करें" : "मेनू खोलें"}
+          aria-expanded={menuOpen}
+        >
+          {menuOpen ? <X size={19} /> : <Menu size={19} />}
+        </button>
+      </div>
+
+      {/* mobile menu panel */}
+      <div
         className={cn(
-          "ml-auto flex flex-wrap gap-1 rounded-full border p-1",
-          isHome ? "border-white/15 bg-white/8" : "border-border bg-white/80"
+          "overflow-hidden border-t border-border bg-white transition-[max-height] duration-300 ease-in-out md:hidden",
+          menuOpen ? "max-h-[420px]" : "max-h-0 border-t-0"
         )}
       >
-        {navItems.map((item) => {
-          const active = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "rounded-full px-4 py-2 text-[13px] font-bold transition-all",
-                active
-                  ? "bg-gradient-to-br from-orange-400 to-primary-dark text-white shadow-md"
-                  : isHome
-                  ? "text-white/85 hover:text-white"
-                  : "text-heading hover:bg-bg"
-              )}
-            >
-              {item.label}
-            </Link>
-          );
-        })}
-        {isAuthed && (
-          <button
-            onClick={handleLogout}
-            className={cn(
-              "rounded-full px-4 py-2 text-[13px] font-bold transition-all",
-              isHome ? "text-white/85 hover:text-white" : "text-heading hover:bg-bg"
-            )}
-          >
-            {d.nav.logout}
-          </button>
-        )}
-      </nav>
-
-      <LanguageSwitcher dark={isHome} />
+        <nav className="flex flex-col gap-1 px-4 py-3">
+          {navItems.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "rounded-xl px-4 py-3 text-[14.5px] font-bold transition-colors",
+                  active ? "bg-primary-light text-primary-dark" : "text-heading active:bg-bg"
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+          {isAuthed && (
+            <button onClick={doLogout} disabled={pending} className="rounded-xl px-4 py-3 text-left text-[14.5px] font-bold text-danger active:bg-red-50">
+              {d.nav.logout}
+            </button>
+          )}
+          <div className="mt-2 flex justify-center border-t border-border pt-3">
+            <LanguageSwitcher />
+          </div>
+        </nav>
+      </div>
     </header>
   );
 }
