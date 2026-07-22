@@ -157,7 +157,7 @@ export function RegisterWizard() {
                 </Select>
               </div>
               <Err k="dobDay" /><Err k="dobMonth" /><Err k="dobYear" />
-              {/* <div className="mt-1 text-[11px] text-muted">{d.register.ageHint}</div> */}
+              <div className="mt-1 text-[11px] text-muted">{d.register.ageHint}</div>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -252,7 +252,15 @@ export function RegisterWizard() {
               </div>
               <div>
                 <Label>{d.register.booth}</Label>
-                <Input value={f.booth} onChange={(e) => set("booth", e.target.value)} placeholder={d.register.boothOptional} />
+                <Input
+                  value={f.booth}
+                  inputMode="numeric"
+                  maxLength={6}
+                  onChange={(e) => set("booth", e.target.value.replace(/\D/g, ""))}
+                  placeholder={d.register.boothOptional}
+                  style={errStyle("booth")}
+                />
+                <Err k="booth" />
               </div>
               <div>
                 <Label required>{d.register.pincode}</Label>

@@ -39,7 +39,7 @@ export const electoralSchema = z.object({
   districtId: z.string().min(1, "जिला चुनें"),
   assemblyId: z.string().min(1, "विधानसभा क्षेत्र चुनें"),
   mandalId: z.string().min(1, "मंडल चुनें"),
-  booth: z.string().trim().optional().or(z.literal("")),
+  booth: z.string().trim().regex(/^\d{1,6}$/, "बूथ केवल अंक होना चाहिए (अधिकतम 6 अंक)").optional().or(z.literal("")),
   address: z.string().trim().min(5, "पता अनिवार्य है"),
   pincode: z.string().regex(/^\d{6}$/, "मान्य 6 अंकों का पिनकोड डालें"),
 });
