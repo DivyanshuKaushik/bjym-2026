@@ -252,7 +252,7 @@ export const dictionary: Record<Locale, Dict> = {
             ],
             photoLabel: "पासपोर्ट साइज फोटो अपलोड करें।",
             photoHint: "फोटो चुनें, फिर क्रॉप, ज़ूम एवं रोटेट करें",
-            photoReady: "Photo ready ✓ (passport ratio, WebP)",
+            photoReady: "Photo ready ✓",
             photoChange: "बदलने के लिए click करें",
             photoCropApply: "Crop लागू करें ✓",
             photoCropCancel: "रद्द करें",

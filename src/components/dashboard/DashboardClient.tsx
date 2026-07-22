@@ -77,7 +77,7 @@ export function DashboardClient({
       )}
       {member.verification_status === "Rejected" && (
         <div className="mb-6 rounded-2xl border border-danger/30 bg-red-50 px-5 py-3 text-[13px] font-bold text-danger">
-          आपका आवेदन अस्वीकृत हुआ है। कारण: {member.rejection_reason || "—"}
+          आपका आवेदन अस्वीकृत हुआ है। कारण: {(member.rejection_reason || "—")}
         </div>
       )}
 

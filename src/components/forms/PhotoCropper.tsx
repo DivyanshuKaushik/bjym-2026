@@ -107,7 +107,7 @@ export function PhotoCropper({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={photo} alt="preview" className="h-24 w-[72px] rounded-lg border-[3px] border-primary object-cover" />
             <div className="text-left">
-              <div className="text-[13.5px] font-extrabold text-secondary-dark">Photo ready ✓ (passport ratio, WebP)</div>
+              <div className="text-[13.5px] font-extrabold text-secondary-dark">Photo ready ✓</div>
               <div className="text-xs text-muted">बदलने के लिए click करें</div>
             </div>
           </>

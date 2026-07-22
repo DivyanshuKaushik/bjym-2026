@@ -106,7 +106,7 @@ export function RegisterWizard() {
         </div>
         <div className="mt-2.5 font-serif text-[28px] font-black text-heading">{d.register.title}</div>
         <div className="mt-1 text-sm text-muted">{d.register.subtitle}</div>
-        <div className="mt-2 text-[11px] text-primary-dark">{d.register.disclaimer}</div>
+        <div className="mt-2 text-[11px] font-bold text-primary-dark">{d.register.disclaimer}</div>
       </div>
 
       <div className="mb-6 flex gap-2">
