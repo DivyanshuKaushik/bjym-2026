@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Anek_Devanagari } from "next/font/google";
 import "./globals.css";
 import { LanguageProvider } from "@/lib/i18n/LanguageProvider";
 import { QueryProvider } from "@/components/providers/QueryProvider";
@@ -6,6 +7,17 @@ import { SiteHeader } from "@/components/common/SiteHeader";
 import { Footer } from "@/components/common/Footer";
 import { TricolorStrip } from "@/components/common/TricolorStrip";
 import { SITE_CONFIG, SITE_URL } from "@/lib/seo/site-config";
+
+// Site-wide font — replaces the previous system-font/Georgia/Noto Sans
+// Devanagari mix everywhere (see tailwind.config.ts `sans`/`serif`, which
+// both now point at this one variable, plus every component that used
+// an inline `fontFamily` style directly).
+const anekDevanagari = Anek_Devanagari({
+  subsets: ["devanagari", "latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-anek",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -97,8 +109,8 @@ function JsonLd() {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="hi">
-      <body className="min-h-screen bg-bg text-heading antialiased">
+    <html lang="hi" className={anekDevanagari.variable}>
+      <body className="min-h-screen bg-bg text-heading antialiased font-sans">
         <JsonLd />
         <QueryProvider>
           <LanguageProvider>

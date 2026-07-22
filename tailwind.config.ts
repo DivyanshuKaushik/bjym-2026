@@ -20,8 +20,9 @@ const config: Config = {
       },
       borderRadius: { xl: "14px", "2xl": "18px" },
       fontFamily: {
-        devanagari: ["'Noto Sans Devanagari'", "system-ui", "sans-serif"],
-        serif: ["Georgia", "'Noto Serif Devanagari'", "serif"],
+        sans: ["var(--font-anek)", "system-ui", "sans-serif"],
+        devanagari: ["var(--font-anek)", "system-ui", "sans-serif"],
+        serif: ["var(--font-anek)", "system-ui", "serif"],
       },
       keyframes: {
         floaty: { "0%,100%": { transform: "translateY(0) rotate(-3deg)" }, "50%": { transform: "translateY(-14px) rotate(-1.5deg)" } },

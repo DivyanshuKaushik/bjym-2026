@@ -54,7 +54,12 @@ export async function registerMember(input: unknown): Promise<RegisterState> {
     dob,
     gender: data.gender,
     category: data.category,
-    jaati: data.jaati,
+    // Free-text field — normalized to lowercase so "Yadav"/"yadav"/"YADAV"
+    // are all the same value for analytics grouping and any future
+    // duplicate-detection, regardless of how the member typed it.
+    // Display-side capitalization happens only in the analytics view
+    // (src/components/admin/AnalyticsCharts.tsx), never here.
+    jaati: data.jaati.trim().toLowerCase(),
     mobile: data.mobile,
     whatsapp: data.whatsappSameAsMobile ? data.mobile : data.whatsapp,
     email: data.email,

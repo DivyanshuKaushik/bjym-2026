@@ -79,7 +79,7 @@ export const MembershipCard = React.forwardRef<HTMLDivElement, { data: IDCardDat
           borderRadius: 22,
           background: "linear-gradient(180deg, #FFFFFF 0%, #FFFDF9 60%, #FFF9F2 100%)",
           boxShadow: "0 24px 60px rgba(31,41,55,.25), 0 0 0 1px rgba(243,107,33,.12)",
-          fontFamily: "'Noto Sans Devanagari', system-ui, sans-serif",
+          fontFamily: "var(--font-anek), 'Noto Sans Devanagari', system-ui, sans-serif",
           display: "flex",
           flexDirection: "column",
         }}

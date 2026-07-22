@@ -11,15 +11,18 @@ export const referralRepository = {
     return (data ?? []) as { referred_membership_id: string; created_at: string }[];
   },
 
-  async leaderboard(limit = 10) {
-    const { data } = await db()
+  async leaderboard(limit = 10, offset = 0) {
+    const { data, count } = await db()
       .from("members")
-      .select("membership_id, full_name, referral_count")
+      .select("membership_id, full_name, referral_count", { count: "exact" })
       .is("deleted_at", null)
       .gt("referral_count", 0)
       .order("referral_count", { ascending: false })
-      .limit(limit);
-    return (data ?? []) as { membership_id: string; full_name: string; referral_count: number }[];
+      .range(offset, offset + limit - 1);
+    return {
+      rows: (data ?? []) as { membership_id: string; full_name: string; referral_count: number }[],
+      total: count ?? 0,
+    };
   },
 
   async count(membershipId: string) {

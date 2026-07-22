@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { memberRepository } from "@/lib/repositories/member.repository";
 import { referralRepository } from "@/lib/repositories/referral.repository";
 import { Card, CardContent } from "@/components/ui/card";
@@ -42,12 +43,15 @@ export default async function AdminOverviewPage() {
 
       <Card>
         <CardContent>
-          <div className="mb-3 font-black text-heading">Top Referrers</div>
-          {leaderboard.length === 0 ? (
+          <div className="mb-3 flex items-center justify-between">
+            <div className="font-black text-heading">Top Referrers</div>
+            <Link href="/admin/analytics" className="text-xs font-bold text-primary-dark hover:underline">पूरी लिस्ट देखें →</Link>
+          </div>
+          {leaderboard.rows.length === 0 ? (
             <div className="text-sm text-muted">अभी तक कोई referral नहीं हुआ।</div>
           ) : (
             <div className="grid gap-1.5">
-              {leaderboard.map((l, i) => (
+              {leaderboard.rows.map((l, i) => (
                 <div key={l.membership_id} className="flex items-center justify-between border-b border-border py-2 text-[13px] last:border-0">
                   <span className="font-bold text-heading">#{i + 1} — {l.full_name} <span className="text-muted">({l.membership_id})</span></span>
                   <span className="rounded-full bg-secondary-light px-3 py-0.5 font-black text-secondary-dark">{l.referral_count} referrals</span>
