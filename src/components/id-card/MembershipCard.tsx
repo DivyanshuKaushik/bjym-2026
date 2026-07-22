@@ -55,7 +55,7 @@ function InfoRow({
         >
           {/* <div className="absolute left-0 flex h-6 w-6 roundeditems-center justify-center text-[13px] text-primary-dark"> */}
 
-            {icon}
+            {/* {icon} */}
           {/* </div> */}
             <span
                 style={{
@@ -91,7 +91,7 @@ function InfoRow({
                 className="capitalize ml-0.5"
                 style={{
                     fontSize: valueFontSizeFor(value),
-                    fontWeight: 800,
+                    fontWeight: 900,
                     color: C.ink,
                     whiteSpace: "nowrap",
                     // overflow: "hidden",
