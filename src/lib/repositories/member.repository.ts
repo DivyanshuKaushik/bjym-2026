@@ -140,13 +140,16 @@ export const memberRepository = {
 
   async list(params: {
     q?: string;
+    loksabhaId?: string;
     districtId?: string;
     assemblyId?: string;
     mandalId?: string;
     category?: string;
+    jaati?: string;
     gender?: string;
     status?: string;
     verificationStatus?: string;
+    hasReferral?: boolean;
     dateFrom?: string;
     dateTo?: string;
     limit?: number;
@@ -154,21 +157,22 @@ export const memberRepository = {
   }) {
     let query = db().from("members").select("*", { count: "exact" }).order("created_at", { ascending: false });
 
-    if (params.q) {
-      const q = params.q.trim().replace(/[,()]/g, "");
-      query = query.textSearch("search_vector", q, { type: "plain", config: "simple" });
-    }
+    query = applySearch(query, params.q);
+    if (params.loksabhaId) query = query.eq("loksabha_id", params.loksabhaId);
     if (params.districtId) query = query.eq("district_id", params.districtId);
     if (params.assemblyId) query = query.eq("assembly_id", params.assemblyId);
     if (params.mandalId) query = query.eq("mandal_id", params.mandalId);
     if (params.category) query = query.eq("category", params.category);
+    if (params.jaati) query = query.ilike("jaati", `%${sanitizeLike(params.jaati)}%`);
     if (params.gender) query = query.eq("gender", params.gender);
     if (params.status) query = query.eq("status", params.status);
     if (params.verificationStatus) query = query.eq("verification_status", params.verificationStatus);
+    if (params.hasReferral === true) query = query.gt("referral_count", 0);
+    if (params.hasReferral === false) query = query.eq("referral_count", 0);
     if (params.dateFrom) query = query.gte("created_at", params.dateFrom);
     if (params.dateTo) query = query.lte("created_at", params.dateTo);
 
-    query = query.range(params.offset ?? 0, (params.offset ?? 0) + (params.limit ?? 60) - 1);
+    query = query.range(params.offset ?? 0, (params.offset ?? 0) + (params.limit ?? 50) - 1);
 
     const { data, count } = await query;
     return { rows: (data ?? []) as MemberRow[], total: count ?? 0 };
@@ -327,6 +331,8 @@ export type ExportFilters = {
   verificationStatus?: string;
   gender?: string;
   category?: string;
+  jaati?: string;
+  loksabhaId?: string;
   districtId?: string;
   assemblyId?: string;
   mandalId?: string;
@@ -336,22 +342,44 @@ export type ExportFilters = {
   q?: string;
 };
 
+/** Sanitizes a value used inside an ILIKE `%...%` pattern: strips ILIKE's
+ *  own wildcard characters (so a literal `%`/`_` typed by the admin
+ *  doesn't turn into an unintended wildcard) and PostgREST's `.or()`
+ *  filter-syntax separators (`,`/`(`/`)`), which would otherwise break
+ *  the filter string when several ORed conditions are combined. */
+function sanitizeLike(value: string): string {
+  return value.trim().replace(/[%_,()]/g, "").slice(0, 100);
+}
+
+/** Reliable admin search: ILIKE substring match (not whole-token
+ *  full-text search) across exactly the fields the spec calls out —
+ *  Membership ID, Name, Mobile, Email, Referral Code — backed by
+ *  pg_trgm GIN indexes (000018_search_fix.sql) so this stays fast at
+ *  5+ lakh rows despite the leading wildcard. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applySearch(query: any, q?: string) {
+  if (!q) return query;
+  const term = sanitizeLike(q);
+  if (!term) return query;
+  const like = `%${term}%`;
+  return query.or(`membership_id.ilike.${like},full_name.ilike.${like},mobile.ilike.${like},email.ilike.${like},referral_code.ilike.${like}`);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applyExportFilters(query: any, filters: ExportFilters) {
   if (filters.status) query = query.eq("status", filters.status);
   if (filters.verificationStatus) query = query.eq("verification_status", filters.verificationStatus);
   if (filters.gender) query = query.eq("gender", filters.gender);
   if (filters.category) query = query.eq("category", filters.category);
+  if (filters.jaati) query = query.ilike("jaati", `%${sanitizeLike(filters.jaati)}%`);
+  if (filters.loksabhaId) query = query.eq("loksabha_id", filters.loksabhaId);
   if (filters.districtId) query = query.eq("district_id", filters.districtId);
   if (filters.assemblyId) query = query.eq("assembly_id", filters.assemblyId);
   if (filters.mandalId) query = query.eq("mandal_id", filters.mandalId);
   if (filters.hasReferral) query = query.gt("referral_count", 0);
   if (filters.dateFrom) query = query.gte("created_at", filters.dateFrom);
   if (filters.dateTo) query = query.lte("created_at", filters.dateTo);
-  if (filters.q) {
-    const q = filters.q.trim().replace(/[,()]/g, "");
-    query = query.textSearch("search_vector", q, { type: "plain", config: "simple" });
-  }
+  query = applySearch(query, filters.q);
   return query;
 }
 

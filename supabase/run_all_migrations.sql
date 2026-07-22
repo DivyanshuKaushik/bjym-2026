@@ -1,5 +1,5 @@
 -- =====================================================================
--- COMBINED MIGRATION FILE — runs all 000001..000016 migrations in order.
+-- COMBINED MIGRATION FILE — runs all 000001..000019 migrations in order.
 -- Paste this ONE file into Supabase SQL Editor instead of running each
 -- file one by one. Safe to re-run (every statement is idempotent).
 --
@@ -1010,4 +1010,108 @@ alter table public.members add column if not exists loksabha_name_en text;
 alter table public.members add column if not exists loksabha_name_hi text;
 
 create index if not exists idx_members_loksabha on public.members(loksabha_id);
+
+
+-- ============ FROM: 000017_rename_team_member.sql ============
+-- =====================================================================
+-- 000017_rename_team_member.sql
+--
+-- Renames the SUPERVISOR role to TEAM_MEMBER, and narrows its
+-- permissions to ONLY member verification (approve/reject) — per the
+-- updated spec, Team Members must not see analytics, exports, the full
+-- member list, settings, referral analytics, dashboard stats, admin/role
+-- management, or be able to suspend/activate members/reset MPIN.
+--
+-- Safe to re-run.
+-- =====================================================================
+
+update public.roles set name = 'TEAM_MEMBER', description = 'Created by Master Admin. Can only review pending members: view their photo/name/mobile, then approve or reject. No other access.'
+where name = 'SUPERVISOR';
+
+-- Replace TEAM_MEMBER's permission set entirely (delete then re-insert,
+-- rather than trying to diff — simplest way to guarantee it matches
+-- exactly what's listed above, regardless of what an older seed granted).
+delete from public.role_permissions
+where role_id = (select id from public.roles where name = 'TEAM_MEMBER');
+
+insert into public.role_permissions (role_id, permission_id)
+select r.id, p.id
+from public.roles r
+join public.permissions p on p.key in ('members.approve', 'members.reject')
+where r.name = 'TEAM_MEMBER'
+on conflict do nothing;
+
+
+-- ============ FROM: 000018_search_fix.sql ============
+-- =====================================================================
+-- 000018_search_fix.sql
+--
+-- FIX for unreliable admin search. Two problems with the previous
+-- approach (tsvector + plainto_tsquery):
+--   1. tsvector matches whole lexemes only — searching "0001" would NOT
+--      match membership_id "BJYM-CG-2026-000123" as a substring, which
+--      is exactly the kind of partial-digit search an admin does.
+--   2. referral_code was never included in the search vector at all,
+--      so "Search should work for Referral Code" silently failed.
+--
+-- Fix: switch admin search to ILIKE '%term%' across the exact fields
+-- requested (membership_id, full_name, mobile, email, referral_code),
+-- backed by pg_trgm trigram GIN indexes so ILIKE with a leading wildcard
+-- still uses an index instead of a sequential scan — this is what keeps
+-- search fast at 5+ lakh rows. The generated `search_vector` column is
+-- left in place (harmless) but the app no longer queries it for the
+-- member search box.
+-- =====================================================================
+
+create extension if not exists "pg_trgm";
+
+create index if not exists idx_members_trgm_membership_id on public.members using gin (membership_id gin_trgm_ops);
+create index if not exists idx_members_trgm_full_name on public.members using gin (full_name gin_trgm_ops);
+create index if not exists idx_members_trgm_mobile on public.members using gin (mobile gin_trgm_ops);
+create index if not exists idx_members_trgm_email on public.members using gin (email gin_trgm_ops);
+create index if not exists idx_members_trgm_referral_code on public.members using gin (referral_code gin_trgm_ops);
+
+
+-- ============ FROM: 000019_membership_id_7_digits.sql ============
+-- =====================================================================
+-- 000019_membership_id_7_digits.sql
+--
+-- Bumps the membership ID serial padding from 6 digits to 7, ahead of
+-- the 10-lakh (10,00,000 / 1,000,000) user target.
+--
+-- Note on why this was necessary at all: `lpad(next_serial::text, 6, '0')`
+-- does NOT truncate — it only pads UP TO a minimum width. Serial 1000000
+-- (7 digits) already produced 'BJYM-CG-2026-1000000' correctly even with
+-- the old 6-digit padding; nothing would have broken or been cut off past
+-- 999999. This migration is a presentation choice, not a bug fix: with a
+-- 10-lakh target, most real IDs will be 7 digits anyway, so starting the
+-- padding at 7 from the get-go keeps every ID the same length (and
+-- therefore visually consistent on the ID card, in exports, in search
+-- results, etc.) all the way up to 99,99,999 members, instead of member
+-- #1 through #999,999 looking shorter than member #1,000,000 onward.
+--
+-- `create or replace function` — safe to re-run, and applies immediately
+-- to the very next membership_id generated after this migration runs.
+-- Every ID generated *before* this migration keeps its original (6-digit-
+-- padded, or organically-longer) value; this only changes the padding
+-- width used going forward, nothing is renumbered or backfilled.
+-- =====================================================================
+
+create or replace function public.generate_membership_id()
+returns text
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  cur_year int := extract(year from now());
+  next_serial int;
+begin
+  insert into public.membership_sequences (year, last_serial)
+  values (cur_year, 1)
+  on conflict (year) do update set last_serial = public.membership_sequences.last_serial + 1
+  returning last_serial into next_serial;
+
+  return 'BJYM-CG-' || cur_year || '-' || lpad(next_serial::text, 7, '0');
+end;
+$$;
 

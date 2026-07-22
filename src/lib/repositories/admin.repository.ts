@@ -54,7 +54,7 @@ export const adminRepository = {
       username: r.username,
       fullName: r.full_name,
       roleId: r.role_id,
-      roleName: roleMap.get(r.role_id) ?? "SUPERVISOR",
+      roleName: roleMap.get(r.role_id) ?? "TEAM_MEMBER",
       isActive: r.is_active,
       lastLogin: r.last_login,
       createdAt: r.created_at,

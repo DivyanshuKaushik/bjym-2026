@@ -7,7 +7,7 @@ This is a ground-up refactor of the previous version: authentication moved
 off Supabase Auth entirely (no MAU limits), members log in with
 **mobile/email + MPIN** instead of a password, the org hierarchy moved out
 of the database into code, and the admin side got real RBAC (Master Admin
-vs Supervisor) plus an export module.
+vs Team Member) plus an export module.
 
 ---
 
@@ -71,7 +71,7 @@ from a partial earlier attempt silently conflicting with a fresh run).
    - paste `supabase/run_all_migrations.sql` (all 16, in order) into a new
      SQL Editor query and Run, **or**
    - paste `supabase/reset_and_migrate.sql` instead of doing steps 2+3
-     separately — it's reset.sql followed by all 16 migrations in one file, **or**
+     separately — it's reset.sql followed by all 18 migrations in one file, **or**
    - `npm run db:push` via the Supabase CLI (applies
      `supabase/migrations/*.sql` in filename order automatically).
 4. Seed the default Master Admin — **either**:
@@ -118,6 +118,12 @@ from a partial earlier attempt silently conflicting with a fresh run).
   `members` (nullable, additive — doesn't touch 000004); see §13 for why
   Lok Sabha is a separate, independent dataset from the District/Assembly/
   Mandal hierarchy
+- `000017_rename_team_member.sql` — renames the `SUPERVISOR` role to
+  `TEAM_MEMBER` and narrows its permissions to verification-only
+  (`members.approve`, `members.reject`) — see §16
+- `000018_search_fix.sql` — `pg_trgm` trigram indexes backing reliable
+  ILIKE substring search on membership ID/name/mobile/email/referral code
+  — see §16
 
 ## 4. Local development
 
@@ -185,9 +191,13 @@ Two seeded roles:
   `src/lib/rbac/permissions.ts` → `PERMISSIONS`): dashboard, analytics,
   full member management, export, hierarchy view, settings, admin user
   management, activity logs.
-- **SUPERVISOR** — created by a Master Admin. Can view members, approve/
-  reject/suspend/activate members, and reset a member's MPIN. Cannot see
-  analytics, export data, delete members, create admins, or touch settings.
+- **TEAM_MEMBER** (renamed from "Supervisor") — created by a Master Admin.
+  Verification only: views the pending-verification queue (photo, name,
+  mobile), then approves or rejects. No dashboard stats, no member list
+  browsing, no suspend/activate, no MPIN reset, no analytics/export/
+  settings/admin-management — see `DEFAULT_ROLE_PERMISSIONS.TEAM_MEMBER`
+  in `src/lib/rbac/permissions.ts`, which is now just
+  `[MEMBERS_APPROVE, MEMBERS_REJECT]`.
 
 Enforcement happens at **three layers**, deliberately redundant:
 
@@ -235,7 +245,7 @@ when, format, filters, row count) and shown in the **Export History**
 table. `export_jobs` additionally tracks per-job progress and holds the
 finished file (base64) for re-download. All export Server Actions
 re-validate the caller's `members.export` permission on every call — a
-Supervisor hitting them directly gets rejected regardless of what the UI
+A Team Member hitting them directly gets rejected regardless of what the UI
 shows.
 
 ## 8. Analytics
@@ -348,7 +358,7 @@ src/
     i18n/                     Hindi/English dictionary + provider
   types/database.ts           Hand-authored DB types (see §3 re: db:generate-types)
 supabase/
-  migrations/000001..000016.sql
+  migrations/000001..000018.sql
   seed.sql                    Default Master Admin (pgcrypto bcrypt, matches bcryptjs)
   config.toml
 scripts/create-admin.mjs      Node alternative to `db:seed` for the Master Admin
@@ -367,14 +377,14 @@ cp .env.example .env.local        # fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_
 
 # 1. Reset (SQL Editor -> paste supabase/reset.sql -> Run) — safe even on a brand-new project
 # 2. Migrate: paste supabase/run_all_migrations.sql into SQL Editor, OR:
-npm run db:push                   # applies all 16 migrations in filename order
+npm run db:push                   # applies all 18 migrations in filename order
 # ...or do both 1+2 in one paste: supabase/reset_and_migrate.sql
 
 npm run db:seed                   # or: npm run create-admin
 npm run dev
 ```
 
-Migrations 000001-000006 and 000008-000016 always do real work.
+Migrations 000001-000006 and 000008-000018 always do real work.
 `000007_repair_legacy_tables.sql` only matters if this Supabase project
 previously ran an older version of this schema (patches
 `activity_logs`/`settings` if they're in an old shape) — it's a no-op on
@@ -549,5 +559,125 @@ rough and it's a contained fix.
   reset` (the pre-existing `db:reset` script) only resets a *local*
   Supabase instance started with `supabase start`, which isn't what most
   people running `db:push` against a hosted project actually want.
+
+## 16. Phase 5 — referral fix, role rename, filters, Hindi-only, new ID card
+
+- **Referral system — root cause found and fixed.** The registration
+  form never actually captured a referral code (not from the `?ref=`
+  link the dashboard generates, not from any input field), so
+  `referred_by_code` was always `null` and the entire downstream chain
+  (member_referrals rows, referral_count, leaderboard, analytics) was
+  silently empty. Fixed: `RegisterWizard` now reads `?ref=CODE` from the
+  URL on mount and pre-fills an editable referral code field in the
+  Security step; `registerMember` validates it against a real, active
+  member (`memberRepository.referralCodeExists`) before crediting it — an
+  invalid/mistyped code is dropped rather than blocking registration. The
+  DB trigger (`after_member_insert`) was already correct; it just never
+  received a value to act on.
+- **SUPERVISOR renamed to TEAM_MEMBER, permissions narrowed.** Migration
+  `000017_rename_team_member.sql` renames the role and replaces its
+  `role_permissions` entirely with just `members.approve` +
+  `members.reject` — no dashboard, no member list, no suspend/activate,
+  no MPIN reset, no analytics/export/settings/admin-management. A Team
+  Member's post-login landing page and any permission-denied redirect
+  now resolve via `getDefaultAdminRoute()` (`src/lib/rbac/permissions.ts`)
+  instead of a hardcoded `/admin` — otherwise a role with no
+  `dashboard.view` would get redirected to a dashboard it also can't see,
+  looping.
+- **Admin notifications removed.** The bell icon/dropdown are gone from
+  `AdminTopbar.tsx`; the admin layout no longer fetches KPI data just for
+  that (it wasn't used for anything else).
+- **Admin search & filters — reliability fix, not just more filters.**
+  The previous implementation used Postgres full-text search
+  (`tsvector`/`plainto_tsquery`), which only matches whole lexemes — so
+  searching a partial membership ID like "0001" would never match
+  "BJYM-CG-2026-000123", and `referral_code` wasn't indexed into the
+  search vector at all. Switched to `ILIKE '%term%'` across exactly
+  membership ID / name / mobile / email / referral code, backed by
+  `pg_trgm` trigram GIN indexes (`000018_search_fix.sql`) so substring
+  search still uses an index at 5+ lakh rows instead of a sequential
+  scan. Added the missing filters (Lok Sabha, Assembly, Mandal, Jaati,
+  Referral status, date range) to both the Members page and the Export
+  module, both with an explicit **Search / Apply Filters** button and a
+  **Reset Filters** button — filters never auto-apply while you're still
+  selecting them. The Members page also now paginates properly (50/page,
+  `?page=` in the URL, all active filters preserved across pages) instead
+  of a flat 60-row cap.
+- **Multilingual support removed — Hindi only.** The visible language
+  switcher is gone from the Navbar and the `LanguageSwitcher.tsx`
+  component was deleted; `LanguageProvider` now always resolves to
+  Hindi with no setter, so every existing `d.<key>` lookup across the
+  codebase kept working unchanged (no need to touch every component).
+  Registration dropdowns (District/Assembly/Mandal/Lok Sabha/Category)
+  that render `nameEn`/`nameHi` based on locale now always render
+  `nameHi`, automatically, as a side effect.
+- **Age validation: 16–40** (was 18–40) — `MIN_AGE` in `src/data/dob.ts`
+  is the single source of truth for both the year-dropdown range and
+  the Zod validation, so this one change updates frontend and backend
+  together.
+- **ID card — rebuilt to match your latest official template**
+  (`MembershipCard.tsx`): stacked gradient "भारतीय जनता युवा मोर्चा" /
+  "छत्तीसगढ़" heading, rounded-pill green "डिजिटल सदस्यता कार्ड 2026"
+  banner, centered photo with a saffron→green gradient ring, label:value
+  detail rows (सदस्यता क्रमांक, नाम, जन्मतिथि, जिला, मंडल), a divider,
+  then a footer split into the QR code (bottom-left, per spec) and a
+  signature block (bottom-right), and the saffron→green gradient bottom
+  bar with the portal URL. Long values (names, longer membership IDs)
+  shrink their own font in steps rather than truncating.
+
+## 17. Phase 6 — the "filters don't work" bug, loading states, activity log pagination
+
+- **Root cause of "9 of 3 members shown" / filters and search appearing
+  to do nothing.** This was never a broken query — `member.repository.ts`'s
+  `list()` always applied filters correctly to both the row data and the
+  count (they come from the same PostgREST request). The bug was in
+  `MembersTable.tsx` (and, less visibly, `AdminUsersClient.tsx` and
+  `VerificationQueue.tsx`): each did `const [rows, setRows] = useState(members)`,
+  which only seeds state from a prop on that component instance's *first*
+  mount. When you changed a filter, the parent Server Component re-ran
+  with a freshly-filtered `members` prop, but Next.js reuses the same
+  Client Component instance across that navigation rather than
+  remounting it — so `rows` stayed frozen at whatever loaded first
+  (every member), while `total` (rendered directly from the prop, no
+  local state involved) correctly updated to the filtered count. Hence
+  "9 of 3": 9 stale rows, 3 correct. Same explanation for membership-ID
+  search appearing to do nothing. Fixed with a `useEffect(() =>
+  setRows(members), [members])` in all three components (and the
+  equivalent for `MemberDetailClient`'s status/verification state, keyed
+  additionally off `member.id`) — this is the standard fix for "state
+  derived from props" in React; the local state is still needed (for
+  optimistic UI after suspend/approve/etc.), it just now resyncs whenever
+  the underlying data actually changes.
+- **Membership ID padding**: reverted to 6 digits, per your call — you
+  don't expect to cross 999,999 members, and since `lpad()` only pads up
+  to a minimum width (never truncates), IDs still grow safely past 6
+  digits with zero code changes if that ever changes (`BJYM-CG-2026-999999`
+  → `BJYM-CG-2026-1000000` automatically, no migration needed to "turn
+  on" 7 digits later either — it just happens as soon as the serial
+  passes 999,999).
+- **Loading states**: added Next.js's native per-segment `loading.tsx`
+  for `/admin/members`, `/admin/verification`, `/admin/activity-logs`,
+  and `/admin/analytics` — these render automatically while that route's
+  Server Component is fetching, including on a filter/pagination
+  navigation. Additionally, the Members filter bar's Search/Reset
+  buttons and the pagination Prev/Next buttons now show their own
+  "लोड हो रहा है…" pending state via `useTransition`, for instant
+  feedback even before the route-level loading UI kicks in.
+- **Members pagination**: switched from a flat 60-row cap with no
+  paging to real pagination — 50 per page, `?page=` in the URL, every
+  active filter preserved when moving between pages
+  (`MembersPagination.tsx`).
+- **Activity Logs pagination**: 25 entries per page (was a flat 100-row
+  cap with no paging at all) — `?page=` in the URL via
+  `ActivityLogsPagination.tsx`, keeping this page fast regardless of how
+  large the log table grows.
+- **Topbar member-search hidden from Team Members.** `AdminTopbar.tsx`'s
+  quick "सदस्य, ID खोजें…" box was rendered unconditionally for every
+  admin, regardless of role — a Team Member (verification-only, no
+  `members.view`) could see and use it, even though the destination
+  (`/admin/members`) is something they have no reason to be in (they
+  can't suspend/activate/browse members — see §16). It now only renders
+  when `permissions.includes(PERMISSIONS.MEMBERS_VIEW)`
+  (`AdminLayout` → `AdminTopbar`'s new `canSearchMembers` prop).
 
 Built by Techxos · techxos.in

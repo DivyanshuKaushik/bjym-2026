@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Avatar } from "@/components/common/Avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,10 @@ import type { MemberRow } from "@/lib/repositories/member.repository";
 export function MemberDetailClient({ member, referrals }: { member: MemberRow; referrals: { referred_membership_id: string; created_at: string }[] }) {
   const [status, setStatus] = useState(member.status);
   const [verificationStatus, setVerificationStatus] = useState(member.verification_status);
+  useEffect(() => {
+    setStatus(member.status);
+    setVerificationStatus(member.verification_status);
+  }, [member.id, member.status, member.verification_status]);
   const [rejectReason, setRejectReason] = useState("");
   const [newMpin, setNewMpin] = useState("");
   const [msg, setMsg] = useState<string | null>(null);

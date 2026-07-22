@@ -1,12 +1,12 @@
 export const ROLES = {
   MASTER_ADMIN: "MASTER_ADMIN",
-  SUPERVISOR: "SUPERVISOR",
+  TEAM_MEMBER: "TEAM_MEMBER",
 } as const;
 
 export type RoleName = (typeof ROLES)[keyof typeof ROLES];
 
 /** Every permission key used across the admin dashboard. Mirrors the
- *  `permissions` table seeded by supabase/migrations/000012_seed.sql —
+ *  `permissions` table seeded by supabase/migrations/000013_seed.sql —
  *  keep both in sync when adding a new permission. */
 export const PERMISSIONS = {
   DASHBOARD_VIEW: "dashboard.view",
@@ -33,18 +33,14 @@ export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 /** Fallback role -> permission map, used if the DB-driven role_permissions
  *  table lookup fails for any reason (e.g. seed not run yet). The DB table
  *  is the source of truth in production; this exists so the app never
- *  hard-locks an admin out due to a missing seed row. */
+ *  hard-locks an admin out due to a missing seed row.
+ *
+ *  TEAM_MEMBER (formerly "Supervisor") is intentionally narrow: verification
+ *  only — no dashboard stats, no member list browsing, no suspend/activate,
+ *  no MPIN reset, no analytics/export/settings/admin-management. */
 export const DEFAULT_ROLE_PERMISSIONS: Record<RoleName, Permission[]> = {
   MASTER_ADMIN: Object.values(PERMISSIONS),
-  SUPERVISOR: [
-    PERMISSIONS.DASHBOARD_VIEW,
-    PERMISSIONS.MEMBERS_VIEW,
-    PERMISSIONS.MEMBERS_APPROVE,
-    PERMISSIONS.MEMBERS_REJECT,
-    PERMISSIONS.MEMBERS_SUSPEND,
-    PERMISSIONS.MEMBERS_ACTIVATE,
-    PERMISSIONS.MEMBERS_RESET_MPIN,
-  ],
+  TEAM_MEMBER: [PERMISSIONS.MEMBERS_APPROVE, PERMISSIONS.MEMBERS_REJECT],
 };
 
 export function can(permissions: string[] | undefined, permission: Permission): boolean {
@@ -64,3 +60,14 @@ export const ADMIN_NAV = [
   { href: "/admin/activity-logs", label: "Activity Logs", labelHi: "गतिविधि लॉग", icon: "History", permission: PERMISSIONS.LOGS_VIEW },
   { href: "/admin/settings", label: "Settings", labelHi: "सेटिंग्स", icon: "Settings", permission: PERMISSIONS.SETTINGS_VIEW },
 ] as const;
+
+/** First nav route a given permission set actually grants access to — used
+ *  as the post-login redirect and as the "denied" fallback in middleware,
+ *  so a permission-restricted role (like TEAM_MEMBER, which has no
+ *  dashboard.view) never gets redirected into a route it also can't see
+ *  (which would otherwise loop). Falls back to /admin-login in the
+ *  (should-never-happen) case an admin has no permissions at all. */
+export function getDefaultAdminRoute(permissions: string[]): string {
+  const match = ADMIN_NAV.find((n) => permissions.includes(n.permission));
+  return match?.href ?? "/admin-login";
+}

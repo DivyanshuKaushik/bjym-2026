@@ -47,6 +47,7 @@ export const electoralSchema = z.object({
 const mpinObjectSchema = z.object({
   mpin: z.string().regex(/^\d{4}$|^\d{6}$/, "MPIN 4 या 6 अंकों का होना चाहिए"),
   confirmMpin: z.string(),
+  referredByCode: z.string().trim().optional().or(z.literal("")),
   agree: z.literal(true, { errorMap: () => ({ message: "घोषणा स्वीकार करना अनिवार्य है" }) }),
 });
 

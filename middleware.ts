@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { memberRepository } from "@/lib/repositories/member.repository";
 import { adminRepository } from "@/lib/repositories/admin.repository";
-import { ADMIN_NAV } from "@/lib/rbac/permissions";
+import { ADMIN_NAV, getDefaultAdminRoute } from "@/lib/rbac/permissions";
 
 export default auth(async (req) => {
   const { pathname } = req.nextUrl;
@@ -53,7 +53,7 @@ export default auth(async (req) => {
     const permissions = session.user.permissions ?? [];
     if (!permissions.includes(navItem.permission)) {
       const url = req.nextUrl.clone();
-      url.pathname = "/admin";
+      url.pathname = getDefaultAdminRoute(permissions);
       url.searchParams.set("denied", "1");
       return NextResponse.redirect(url);
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Avatar } from "@/components/common/Avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import type { MemberRow } from "@/lib/repositories/member.repository";
 
 export function VerificationQueue({ members }: { members: MemberRow[] }) {
   const [rows, setRows] = useState(members);
+  useEffect(() => setRows(members), [members]);
   const [reasonFor, setReasonFor] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [pending, startTransition] = useTransition();

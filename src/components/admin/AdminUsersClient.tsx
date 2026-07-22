@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -16,10 +16,11 @@ type AdminRow = {
 
 export function AdminUsersClient({ admins, roles }: { admins: AdminRow[]; roles: { id: string; name: string }[] }) {
   const [rows, setRows] = useState(admins);
+  useEffect(() => setRows(admins), [admins]);
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
-  const [roleName, setRoleName] = useState<"MASTER_ADMIN" | "SUPERVISOR">("SUPERVISOR");
+  const [roleName, setRoleName] = useState<"MASTER_ADMIN" | "TEAM_MEMBER">("TEAM_MEMBER");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -54,8 +55,8 @@ export function AdminUsersClient({ admins, roles }: { admins: AdminRow[]; roles:
             <Input placeholder="पूरा नाम" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
             <Input type="password" placeholder="Password (min 8 chars)" value={password} onChange={(e) => setPassword(e.target.value)} required />
             <Select value={roleName} onChange={(e) => setRoleName(e.target.value as typeof roleName)}>
-              <option value="SUPERVISOR">Supervisor</option>
-              <option value="MASTER_ADMIN">Master Admin</option>
+              <option value="TEAM_MEMBER">टीम सदस्य</option>
+              <option value="MASTER_ADMIN">मास्टर एडमिन</option>
             </Select>
             <Button type="submit" disabled={pending} className="sm:col-span-2">{pending ? "…" : "Admin बनाएं"}</Button>
           </form>

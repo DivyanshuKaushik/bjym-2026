@@ -15,7 +15,7 @@ export const MONTHS = [
 
 export const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
 
-export const MIN_AGE = 18;
+export const MIN_AGE = 16;
 export const MAX_AGE = 40;
 
 /** Years such that (currentYear - year) is within [MIN_AGE, MAX_AGE]. */

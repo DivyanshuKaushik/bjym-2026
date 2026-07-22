@@ -86,30 +86,30 @@ export function CampaignCarousel() {
         <button
           onClick={() => { prev(); pauseThenResume(); }}
           aria-label="पिछली स्लाइड"
-          className="absolute left-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur transition hover:bg-black/55 sm:left-3"
+          className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur transition hover:bg-black/55 sm:left-3"
         >
           ‹
         </button>
         <button
           onClick={() => { next(); pauseThenResume(); }}
           aria-label="अगली स्लाइड"
-          className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur transition hover:bg-black/55 sm:right-3"
+          className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur transition hover:bg-black/55 sm:right-3"
         >
           ›
         </button>
 
         {/* dots */}
-        {/* <div className="absolute bottom-2.5 left-1/2 flex -translate-x-1/2 gap-1.5 sm:bottom-3.5 max-h-1">
+        <div className="absolute bottom-2.5 left-1/2 flex -translate-x-1/2 gap-1.5 sm:bottom-3.5">
           {SLIDES.map((s, i) => (
             <button
               key={s.src}
               onClick={() => { goTo(i); pauseThenResume(); }}
               aria-label={`स्लाइड ${i + 1}`}
-              className="rounded-full transition-all"
-              style={{ width: i === index ? 8 : 4, background: i === index ? "#fff" : "rgba(255,255,255,.55)", }}
+              className="h-2 rounded-full transition-all"
+              style={{ width: i === index ? 20 : 8, background: i === index ? "#fff" : "rgba(255,255,255,.55)" }}
             />
           ))}
-        </div> */}
+        </div>
       </div>
     </div>
   );

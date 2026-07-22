@@ -2,6 +2,8 @@
 
 import { signIn } from "@/lib/auth";
 import { memberLoginSchema, adminLoginSchema } from "@/lib/validators/auth";
+import { adminRepository } from "@/lib/repositories/admin.repository";
+import { getDefaultAdminRoute } from "@/lib/rbac/permissions";
 import { AuthError } from "next-auth";
 
 export async function loginMember(input: unknown) {
@@ -28,12 +30,19 @@ export async function loginAdmin(input: unknown) {
   const parsed = adminLoginSchema.safeParse(input);
   if (!parsed.success) return { error: "कृपया मान्य जानकारी डालें" };
 
+  const admin = await adminRepository.findByUsername(parsed.data.username);
+  let redirectTo = "/admin";
+  if (admin) {
+    const permissions = await adminRepository.permissionsForRole(admin.role_id);
+    redirectTo = getDefaultAdminRoute(permissions);
+  }
+
   try {
     await signIn("admin", {
       username: parsed.data.username,
       password: parsed.data.password,
       remember: String(parsed.data.remember),
-      redirectTo: "/admin",
+      redirectTo,
     });
   } catch (err) {
     if (err instanceof AuthError) {

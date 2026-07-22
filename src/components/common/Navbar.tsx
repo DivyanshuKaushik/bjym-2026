@@ -5,12 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { Menu, X } from "lucide-react";
 import { useLang } from "@/lib/i18n/LanguageProvider";
-import { LanguageSwitcher } from "./LanguageSwitcher";
 import { logout } from "@/app/actions/logout";
 import { cn } from "@/lib/utils";
 
 export function Navbar({ isAuthed, userType }: { isAuthed: boolean; userType: "member" | "admin" | null }) {
-  const { d, locale } = useLang();
+  const { d } = useLang();
   const pathname = usePathname();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -49,12 +48,8 @@ export function Navbar({ isAuthed, userType }: { isAuthed: boolean; userType: "m
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/logo.png" alt="BJYM Chhattisgarh" className="h-9 w-9 shrink-0 rounded-lg object-contain sm:h-10 sm:w-10" />
           <div className="min-w-0 leading-tight">
-            <div className="truncate text-[12.5px] font-black text-heading sm:text-sm">
-              {locale === "en" ? "Bharatiya Janata Yuva Morcha" : "भारतीय जनता युवा मोर्चा"}
-            </div>
-            <div className="truncate text-[9.5px] font-extrabold uppercase tracking-widest text-muted sm:text-[10px]">
-              {locale === "en" ? "Chhattisgarh" : "छत्तीसगढ़"}
-            </div>
+            <div className="truncate text-[12.5px] font-black text-heading sm:text-sm">भारतीय जनता युवा मोर्चा</div>
+            <div className="truncate text-[9.5px] font-extrabold uppercase tracking-widest text-muted sm:text-[10px]">छत्तीसगढ़</div>
           </div>
         </Link>
 
@@ -81,10 +76,6 @@ export function Navbar({ isAuthed, userType }: { isAuthed: boolean; userType: "m
             </button>
           )}
         </nav>
-
-        <div className="ml-auto hidden md:ml-0 md:block">
-          <LanguageSwitcher />
-        </div>
 
         {/* mobile: hamburger */}
         <button
@@ -125,9 +116,6 @@ export function Navbar({ isAuthed, userType }: { isAuthed: boolean; userType: "m
               {d.nav.logout}
             </button>
           )}
-          <div className="mt-2 flex justify-center border-t border-border pt-3">
-            <LanguageSwitcher />
-          </div>
         </nav>
       </div>
     </header>

@@ -35,6 +35,15 @@ export async function registerMember(input: unknown): Promise<RegisterState> {
     return { error: "चयनित लोकसभा क्षेत्र मान्य नहीं है, कृपया दोबारा चुनें" };
   }
 
+  // Referral code (optional): validate it belongs to a real, active member
+  // before crediting it — an invalid/mistyped code is silently dropped
+  // rather than blocking registration, since it's not a required field.
+  let referredByCode: string | null = null;
+  if (data.referredByCode && data.referredByCode.trim()) {
+    const referrer = await memberRepository.referralCodeExists(data.referredByCode.trim().toUpperCase());
+    if (referrer) referredByCode = referrer.referral_code;
+  }
+
   const dob = `${data.dobYear}-${data.dobMonth}-${data.dobDay}`;
   const mpinHash = await memberRepository.hashMpin(data.mpin);
 
@@ -65,6 +74,7 @@ export async function registerMember(input: unknown): Promise<RegisterState> {
     address: data.address,
     pincode: data.pincode,
     mpin_hash: mpinHash,
+    referred_by_code: referredByCode,
     registration_source: "web",
   });
 

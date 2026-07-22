@@ -1,41 +1,27 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext } from "react";
 import { dictionary, type Locale } from "./dictionary";
 
+/**
+ * Multilingual support was removed per project requirements — the
+ * entire application is Hindi-only now. This provider is kept as a thin
+ * shim (rather than deleting it and touching every component that calls
+ * `useLang()`) so `d.<key>` lookups throughout the codebase keep working
+ * unchanged; `locale` is now permanently "hi" and there is no setter.
+ * The visible language switcher UI has been removed from the Navbar.
+ */
 type LangContextType = {
   locale: Locale;
-  setLocale: (l: Locale) => void;
   d: (typeof dictionary)["hi"];
 };
 
-const LangContext = createContext<LangContextType | null>(null);
+const LangContext = createContext<LangContextType>({ locale: "hi", d: dictionary.hi });
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>("hi");
-
-  useEffect(() => {
-    const saved = typeof window !== "undefined" ? (localStorage.getItem("bjym_locale") as Locale | null) : null;
-    if (saved === "hi" || saved === "en") setLocaleState(saved);
-  }, []);
-
-  const setLocale = (l: Locale) => {
-    setLocaleState(l);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("bjym_locale", l);
-      document.cookie = `bjym_locale=${l}; path=/; max-age=31536000`;
-    }
-  };
-
-  return (
-    <LangContext.Provider value={{ locale, setLocale, d: dictionary[locale] }}>
-      {children}
-    </LangContext.Provider>
-  );
+  return <LangContext.Provider value={{ locale: "hi", d: dictionary.hi }}>{children}</LangContext.Provider>;
 }
 
 export function useLang() {
-  const ctx = useContext(LangContext);
-  if (!ctx) throw new Error("useLang must be used within LanguageProvider");
-  return ctx;
+  return useContext(LangContext);
 }

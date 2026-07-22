@@ -75,7 +75,7 @@ export const authConfig: NextAuthConfig = {
           userType: "admin" as const,
           username: admin.username,
           fullName: admin.full_name,
-          roleName: roleName ?? "SUPERVISOR",
+          roleName: roleName ?? "TEAM_MEMBER",
           permissions,
           tokenVersion: admin.token_version,
           remember: credentials?.remember === "true",

@@ -32,7 +32,7 @@ export function AdminLoginForm() {
             <img src="/brand/logo.png" alt="BJYM Chhattisgarh" className="h-full w-full rounded-lg bg-white object-contain p-0.5" />
           </div>
           <div className="mt-3 text-xl font-black text-heading">Admin Login</div>
-          <div className="text-xs text-muted">Master Admin / Supervisor access only</div>
+          <div className="text-xs text-muted">मास्टर एडमिन / टीम सदस्य के लिए</div>
         </div>
         {error && <div className="mb-4 rounded-xl border border-danger/30 bg-red-50 px-4 py-2.5 text-sm font-bold text-danger">{error}</div>}
         <div className="grid gap-4">

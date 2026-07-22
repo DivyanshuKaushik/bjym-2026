@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { RegisterWizard } from "@/components/forms/RegisterWizard";
 import { SITE_URL } from "@/lib/seo/site-config";
 
@@ -11,7 +12,9 @@ export const metadata: Metadata = {
 export default function RegisterPage() {
   return (
     <div className="px-4 py-14 sm:px-8">
-      <RegisterWizard />
+      <Suspense>
+        <RegisterWizard />
+      </Suspense>
     </div>
   );
 }

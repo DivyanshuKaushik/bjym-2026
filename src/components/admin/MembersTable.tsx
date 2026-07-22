@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { Avatar } from "@/components/common/Avatar";
 import { Badge } from "@/components/ui/badge";
@@ -8,9 +8,21 @@ import { suspendMember, activateMember, softDeleteMember } from "@/app/actions/a
 import { formatDate } from "@/lib/utils";
 import type { MemberRow } from "@/lib/repositories/member.repository";
 
-export function MembersTable({ members, total }: { members: MemberRow[]; total: number }) {
+export function MembersTable({ members, total }: { members: MemberRow[]; total: number; page?: number; pageSize?: number }) {
   const [rows, setRows] = useState(members);
   const [pending, startTransition] = useTransition();
+
+  // BUG FIX: useState(members) only seeds the initial value on first
+  // mount — when a new filtered/paginated `members` prop arrives after a
+  // client-side navigation (Next.js reuses this component instance
+  // rather than remounting it), the old `rows` stayed stuck forever,
+  // while `total` (rendered directly from the prop, no local state)
+  // updated correctly. That mismatch is exactly what showed up as
+  // "9 of 3 members shown" with all 9 unfiltered rows still visible.
+  // Resyncing here whenever the prop actually changes fixes it.
+  useEffect(() => {
+    setRows(members);
+  }, [members]);
 
   const toggle = (m: MemberRow) => {
     startTransition(async () => {
@@ -43,7 +55,7 @@ export function MembersTable({ members, total }: { members: MemberRow[]; total: 
   const verifTone = (s: string) => (s === "Verified" ? "success" : s === "Rejected" ? "danger" : "warning");
 
   return (
-    <div className="rounded-2xl border border-border bg-white shadow-sm">
+    <div className="relative rounded-2xl border border-border bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-border p-3">
         <span className="text-xs text-muted">{rows.length} of {total} members shown</span>
         <button onClick={exportCsv} className="rounded-full border border-border px-3 py-1.5 text-xs font-bold hover:bg-bg">⬇ Quick CSV</button>

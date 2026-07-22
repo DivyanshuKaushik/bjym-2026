@@ -14,7 +14,7 @@
 export type MemberStatus = "Active" | "Suspended" | "Deleted";
 export type VerificationStatus = "Pending" | "Verified" | "Rejected";
 export type Gender = "Male" | "Female" | "Other";
-export type RoleName = "MASTER_ADMIN" | "SUPERVISOR";
+export type RoleName = "MASTER_ADMIN" | "TEAM_MEMBER";
 
 export interface Database {
   public: {

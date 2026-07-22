@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { CATEGORIES, type District } from "@/data/hierarchy";
+import { CATEGORIES, getAssemblies, getMandals, type District } from "@/data/hierarchy";
+import { LOKSABHA_CONSTITUENCIES } from "@/data/loksabha";
 import {
   previewExportCount, fetchExportDataSync, startBackgroundExport,
   getExportJobStatus, downloadExportJobFile, getExportSummary, listMyExportJobs,
@@ -156,9 +157,22 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
             <option value="">सभी Category</option>
             {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
           </Select>
-          <Select value={filters.districtId ?? ""} onChange={(e) => setFilter("districtId", e.target.value)}>
+          <Input placeholder="जाति" value={filters.jaati ?? ""} onChange={(e) => setFilter("jaati", e.target.value)} />
+          <Select value={filters.loksabhaId ?? ""} onChange={(e) => setFilter("loksabhaId", e.target.value)}>
+            <option value="">सभी Lok Sabha</option>
+            {LOKSABHA_CONSTITUENCIES.map((l) => <option key={l.id} value={l.id}>{l.nameHi}</option>)}
+          </Select>
+          <Select value={filters.districtId ?? ""} onChange={(e) => { setFilter("districtId", e.target.value); setFilter("assemblyId", ""); setFilter("mandalId", ""); }}>
             <option value="">सभी District</option>
             {districts.map((d) => <option key={d.id} value={d.id}>{d.nameHi}</option>)}
+          </Select>
+          <Select value={filters.assemblyId ?? ""} disabled={!filters.districtId} onChange={(e) => { setFilter("assemblyId", e.target.value); setFilter("mandalId", ""); }}>
+            <option value="">सभी Assembly</option>
+            {(filters.districtId ? getAssemblies(filters.districtId) : []).map((a) => <option key={a.id} value={a.id}>{a.nameHi}</option>)}
+          </Select>
+          <Select value={filters.mandalId ?? ""} disabled={!filters.assemblyId} onChange={(e) => setFilter("mandalId", e.target.value)}>
+            <option value="">सभी Mandal</option>
+            {(filters.districtId && filters.assemblyId ? getMandals(filters.districtId, filters.assemblyId) : []).map((m) => <option key={m.id} value={m.id}>{m.nameHi}</option>)}
           </Select>
           <label className="flex items-center gap-2 text-xs font-bold text-heading">
             <Checkbox checked={!!filters.hasReferral} onChange={(e) => setFilter("hasReferral", e.target.checked)} />
@@ -168,8 +182,11 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
             <Input type="date" value={filters.dateFrom ?? ""} onChange={(e) => setFilter("dateFrom", e.target.value)} />
             <Input type="date" value={filters.dateTo ?? ""} onChange={(e) => setFilter("dateTo", e.target.value)} />
           </div>
-          <Input placeholder="Search (ID/name/phone/email)" value={filters.q ?? ""} onChange={(e) => setFilter("q", e.target.value)} />
-          <Button size="sm" variant="ghost" onClick={runPreview}>Preview Count</Button>
+          <Input placeholder="Search (ID/name/phone/email/referral code)" value={filters.q ?? ""} onChange={(e) => setFilter("q", e.target.value)} />
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" onClick={() => { setFilters({}); setPreview(null); }}>Reset Filters</Button>
+            <Button size="sm" variant="ghost" onClick={runPreview}>Preview Count</Button>
+          </div>
           {preview && (
             <div className="rounded-xl bg-bg p-3 text-center text-xs font-bold text-heading">
               {preview.count.toLocaleString("en-IN")} records match

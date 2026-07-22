@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useSearchParams } from "next/navigation";
 import { useLang } from "@/lib/i18n/LanguageProvider";
 import { registerMember } from "@/app/actions/register";
 import { personalSchema, electoralSchema, securitySchema } from "@/lib/validators/registration";
@@ -24,18 +25,29 @@ const EMPTY = {
   districtId: "", assemblyId: "", mandalId: "", booth: "",
   loksabhaId: "",
   address: "", pincode: "",
-  mpin: "", confirmMpin: "", agree: false as boolean,
+  mpin: "", confirmMpin: "", referredByCode: "", agree: false as boolean,
 };
 
 const YEARS = getEligibleYearsSorted();
 
 export function RegisterWizard() {
-  const { d } = useLang();
+  const { d, locale } = useLang();
+  const isEn = locale === "en";
+  const searchParams = useSearchParams();
   const [step, setStep] = useState(0);
   const [f, setF] = useState(EMPTY);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // Auto-capture ?ref=CODE from a referral link (dashboard's "Share
+  // Referral Link" generates /register?ref=CODE) — still shown/editable
+  // in the Security step so someone can type a code by hand too.
+  useEffect(() => {
+    const ref = searchParams.get("ref");
+    if (ref) setF((p) => ({ ...p, referredByCode: ref.toUpperCase() }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const set = <K extends keyof typeof EMPTY>(k: K, v: (typeof EMPTY)[K]) => setF((p) => ({ ...p, [k]: v }));
 
@@ -90,7 +102,7 @@ export function RegisterWizard() {
     <div className="mx-auto max-w-[700px] animate-fadeUp">
       <div className="mb-6 text-center">
         <div className="inline-block rounded-full bg-primary-light px-4 py-1.5 text-[11px] font-black uppercase tracking-widest text-primary-dark">
-          Membership Registration
+          {d.register.membershipBadge}
         </div>
         <div className="mt-2.5 font-serif text-[28px] font-black text-heading">{d.register.title}</div>
         <div className="mt-1 text-sm text-muted">{d.register.subtitle}</div>
@@ -110,7 +122,10 @@ export function RegisterWizard() {
 
         {step === 0 && (
           <>
-            <PhotoCropper photo={f.photoBase64 || null} onPhoto={(v) => set("photoBase64", v)} error={errors.photoBase64} onError={setServerError} />
+            <div>
+              <PhotoCropper photo={f.photoBase64 || null} onPhoto={(v) => set("photoBase64", v)} error={errors.photoBase64} onError={setServerError} />
+              <Err k="photoBase64" />
+            </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <Label required>{d.register.fullName}</Label>
@@ -128,20 +143,20 @@ export function RegisterWizard() {
               <Label required>{d.register.dob}</Label>
               <div className="grid grid-cols-3 gap-2">
                 <Select value={f.dobDay} onChange={(e) => set("dobDay", e.target.value)} style={errStyle("dobDay")}>
-                  <option value="">दिन</option>
+                  <option value="">{d.register.day}</option>
                   {DAYS.map((day) => <option key={day} value={day}>{day}</option>)}
                 </Select>
                 <Select value={f.dobMonth} onChange={(e) => set("dobMonth", e.target.value)} style={errStyle("dobMonth")}>
-                  <option value="">महीना</option>
-                  {MONTHS.map((m) => <option key={m.value} value={m.value}>{m.hi} / {m.en}</option>)}
+                  <option value="">{d.register.month}</option>
+                  {MONTHS.map((m) => <option key={m.value} value={m.value}>{isEn ? m.en : m.hi}</option>)}
                 </Select>
                 <Select value={f.dobYear} onChange={(e) => set("dobYear", e.target.value)} style={errStyle("dobYear")}>
-                  <option value="">वर्ष</option>
+                  <option value="">{d.register.year}</option>
                   {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
                 </Select>
               </div>
               <Err k="dobDay" /><Err k="dobMonth" /><Err k="dobYear" />
-              <div className="mt-1 text-[11px] text-muted">सदस्यता के लिए आयु 18-40 वर्ष के बीच होनी चाहिए</div>
+              <div className="mt-1 text-[11px] text-muted">{d.register.ageHint}</div>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -156,15 +171,15 @@ export function RegisterWizard() {
                 <Err k="gender" />
               </div>
               <div>
-                <Label required>वर्ग (Category)</Label>
+                <Label required>{d.register.category}</Label>
                 <Select value={f.category} onChange={(e) => set("category", e.target.value)} style={errStyle("category")}>
-                  <option value="">--</option>
-                  {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.nameHi}</option>)}
+                  <option value="">{d.register.selectPlaceholder}</option>
+                  {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{isEn ? c.nameEn : c.nameHi}</option>)}
                 </Select>
                 <Err k="category" />
               </div>
               <div>
-                <Label required>जाति</Label>
+                <Label required>{d.register.jaati}</Label>
                 <Input value={f.jaati} onChange={(e) => set("jaati", e.target.value)} style={errStyle("jaati")} />
                 <Err k="jaati" />
               </div>
@@ -178,7 +193,7 @@ export function RegisterWizard() {
             <div>
               <label className="flex items-center gap-2 text-xs font-bold text-heading">
                 <Checkbox checked={f.whatsappSameAsMobile} onChange={(e) => toggleWhatsappSame(e.target.checked)} />
-                WhatsApp नंबर मोबाइल नंबर जैसा ही है
+                {d.register.whatsappSame}
               </label>
               {!f.whatsappSameAsMobile && (
                 <div className="mt-2">
@@ -203,40 +218,40 @@ export function RegisterWizard() {
           <>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <Label required>लोकसभा क्षेत्र</Label>
+                <Label required>{d.register.loksabha}</Label>
                 <Select value={f.loksabhaId} onChange={(e) => set("loksabhaId", e.target.value)} style={errStyle("loksabhaId")}>
-                  <option value="">चुनें</option>
-                  {LOKSABHA_CONSTITUENCIES.map((x) => <option key={x.id} value={x.id}>{x.nameHi}</option>)}
+                  <option value="">{d.register.selectPlaceholder}</option>
+                  {LOKSABHA_CONSTITUENCIES.map((x) => <option key={x.id} value={x.id}>{isEn ? x.nameEn : x.nameHi}</option>)}
                 </Select>
                 <Err k="loksabhaId" />
               </div>
               <div>
                 <Label required>{d.register.district}</Label>
                 <Select value={f.districtId} onChange={(e) => { set("districtId", e.target.value); set("assemblyId", ""); set("mandalId", ""); }} style={errStyle("districtId")}>
-                  <option value="">चुनें</option>
-                  {HIERARCHY.map((x) => <option key={x.id} value={x.id}>{x.nameHi}</option>)}
+                  <option value="">{d.register.selectPlaceholder}</option>
+                  {HIERARCHY.map((x) => <option key={x.id} value={x.id}>{isEn ? x.nameEn : x.nameHi}</option>)}
                 </Select>
                 <Err k="districtId" />
               </div>
               <div>
                 <Label required>{d.register.assembly}</Label>
                 <Select value={f.assemblyId} disabled={!f.districtId} onChange={(e) => { set("assemblyId", e.target.value); set("mandalId", ""); }} style={errStyle("assemblyId")}>
-                  <option value="">चुनें</option>
-                  {assemblies.map((x) => <option key={x.id} value={x.id}>{x.nameHi}</option>)}
+                  <option value="">{d.register.selectPlaceholder}</option>
+                  {assemblies.map((x) => <option key={x.id} value={x.id}>{isEn ? x.nameEn : x.nameHi}</option>)}
                 </Select>
                 <Err k="assemblyId" />
               </div>
               <div>
                 <Label required>{d.register.mandal}</Label>
                 <Select value={f.mandalId} disabled={!f.assemblyId} onChange={(e) => set("mandalId", e.target.value)} style={errStyle("mandalId")}>
-                  <option value="">चुनें</option>
-                  {mandals.map((x) => <option key={x.id} value={x.id}>{x.nameHi}</option>)}
+                  <option value="">{d.register.selectPlaceholder}</option>
+                  {mandals.map((x) => <option key={x.id} value={x.id}>{isEn ? x.nameEn : x.nameHi}</option>)}
                 </Select>
                 <Err k="mandalId" />
               </div>
               <div>
                 <Label>{d.register.booth}</Label>
-                <Input value={f.booth} onChange={(e) => set("booth", e.target.value)} placeholder="वैकल्पिक" />
+                <Input value={f.booth} onChange={(e) => set("booth", e.target.value)} placeholder={d.register.boothOptional} />
               </div>
               <div>
                 <Label required>{d.register.pincode}</Label>
@@ -259,25 +274,30 @@ export function RegisterWizard() {
         {step === 2 && (
           <>
             <div className="rounded-2xl border border-navy/15 bg-[#EEEEFC] p-4 text-[13px] leading-relaxed text-heading">
-              आपका Login PIN (MPIN) आवश्यक है:
+              {d.register.mpinExplainTitle}
               <ul className="mt-1.5 list-disc pl-5">
-                <li>ID Card डाउनलोड करने के लिए</li>
-                <li>Referral विवरण देखने के लिए</li>
-                <li>दोबारा लॉगिन करने के लिए</li>
-                <li>प्रोफाइल अपडेट करने के लिए</li>
+                {d.register.mpinExplainItems.map((item) => <li key={item}>{item}</li>)}
               </ul>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <Label required>Login PIN (MPIN) — 4 या 6 अंक</Label>
+                <Label required>{d.register.mpin}</Label>
                 <Input type="password" inputMode="numeric" maxLength={6} value={f.mpin} onChange={(e) => set("mpin", e.target.value.replace(/\D/g, ""))} style={errStyle("mpin")} />
                 <Err k="mpin" />
               </div>
               <div>
-                <Label required>MPIN की पुष्टि करें</Label>
+                <Label required>{d.register.confirmMpin}</Label>
                 <Input type="password" inputMode="numeric" maxLength={6} value={f.confirmMpin} onChange={(e) => set("confirmMpin", e.target.value.replace(/\D/g, ""))} style={errStyle("confirmMpin")} />
                 <Err k="confirmMpin" />
               </div>
+            </div>
+            <div>
+              <Label>{d.register.referralCode}</Label>
+              <Input
+                value={f.referredByCode}
+                onChange={(e) => set("referredByCode", e.target.value.toUpperCase())}
+                placeholder="ABCDE12345"
+              />
             </div>
             <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary-light to-white p-4">
               <label className="flex cursor-pointer items-start gap-2.5 text-[13px] leading-relaxed text-heading">
