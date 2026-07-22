@@ -189,11 +189,13 @@ export function Footer() {
 
                 <div className="mt-8 flex flex-col items-center justify-between gap-2 border-t border-border pt-5 text-[11px] text-muted sm:flex-row">
                     <span>
-                        © {year} भारतीय जनता युवा मोर्चा, छत्तीसगढ़ — सर्वाधिकार
-                        सुरक्षित
+                        © {year} भारतीय जनता युवा मोर्चा, छत्तीसगढ़
                     </span>
-                    <span className="font-bold">
-                        Built by Techxos · techxos.in
+                    <span className="font-bold text-center">
+                        Managed by: Vibhooti Kashyap & BJYM CG State Social Media Team
+                    </span>
+                    <span className="font-bold text-center">
+                       Built by Techxos
                     </span>
                 </div>
             </div>
