@@ -114,8 +114,8 @@ export function PhotoCropper({
         ) : (
           <div>
             <div className="text-2xl">📷</div>
-            <div className="text-[13.5px] font-extrabold text-heading">Passport size photo अपलोड करें</div>
-            <div className="text-xs text-muted">Click करें — फिर crop, zoom, rotate कर सकते हैं</div>
+            <div className="text-[13.5px] font-extrabold text-heading">पासपोर्ट साइज फोटो अपलोड करें।</div>
+            <div className="text-xs text-muted">फोटो चुनें, फिर क्रॉप, ज़ूम एवं रोटेट करें</div>
           </div>
         )}
       </div>

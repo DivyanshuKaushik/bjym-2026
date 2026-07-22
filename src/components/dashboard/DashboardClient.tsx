@@ -54,7 +54,7 @@ export function DashboardClient({
         <div>
           <div className="text-2xl font-black text-heading">{d.dashboard.welcome}, {member.full_name}</div>
           <div className="flex items-center gap-2 text-[12.5px] text-muted">
-            {member.membership_id} <Badge tone={verificationTone}>{member.verification_status}</Badge>
+            {member.membership_id}
           </div>
         </div>
         <div className="ml-auto">
@@ -72,7 +72,7 @@ export function DashboardClient({
 
       {member.verification_status === "Pending" && (
         <div className="mb-6 rounded-2xl border border-warning/30 bg-amber-50 px-5 py-3 text-[13px] font-bold text-amber-800">
-          आपका फोटो एवं विवरण सत्यापन के लिए लंबित है। सत्यापन पूर्ण होने तक ID Card अस्थायी मान्य है।
+         आपका फोटो एवं विवरण सत्यापन हेतु लंबित है। टीम द्वारा शीघ्र ही आपके आवेदन की समीक्षा की जाएगी। सत्यापन पूर्ण होने तक यह डिजिटल सदस्यता कार्ड अस्थायी रूप से मान्य रहेगा। कृपया समय-समय पर "प्रोफाइल" सेक्शन में जाकर अपने सत्यापन की स्थिति देखें।
         </div>
       )}
       {member.verification_status === "Rejected" && (

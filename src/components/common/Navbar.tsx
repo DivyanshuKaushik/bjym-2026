@@ -46,7 +46,7 @@ export function Navbar({ isAuthed, userType }: { isAuthed: boolean; userType: "m
       <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-3 px-4 sm:px-8">
         <Link href="/" className="flex min-w-0 items-center gap-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/logo.png" alt="BJYM Chhattisgarh" className="h-9 w-9 shrink-0 rounded-lg object-contain sm:h-10 sm:w-10" />
+          <img src="/brand/logo.png" alt="BJYM Chhattisgarh" className="h-16 w-16 shrink-0 rounded-lg object-contain sm:h-16 sm:w-16" />
           <div className="min-w-0 leading-tight">
             <div className="truncate text-[12.5px] font-black text-heading sm:text-sm">भारतीय जनता युवा मोर्चा</div>
             <div className="truncate text-[9.5px] font-extrabold uppercase tracking-widest text-muted sm:text-[10px]">छत्तीसगढ़</div>

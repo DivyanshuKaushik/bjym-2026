@@ -1016,7 +1016,7 @@ export const HIERARCHY: District[] = [
           { id: "d23-a3-m2", nameEn: "सिकोला पटरीपार", nameHi: "सिकोला पटरीपार" },
           { id: "d23-a3-m3", nameEn: "सदर गौरवपथ", nameHi: "सदर गौरवपथ" },
           { id: "d23-a3-m4", nameEn: "कसारीडीह बोरसी", nameHi: "कसारीडीह बोरसी" },
-          { id: "d23-a3-m5", nameEn: "मध्य मण्डल (पं. दिनदयाल उपाध्याय)", nameHi: "मध्य मण्डल (पं. दिनदयाल उपाध्याय)" },
+          { id: "d23-a3-m5", nameEn: "मध्य मण्डल (पं. दीनदयाल उपाध्याय)", nameHi: "मध्य मण्डल (पं. दीनदयाल उपाध्याय)" },
         ],
       },
       {
@@ -1488,12 +1488,12 @@ export function findHierarchyLabels(districtId?: string | null, assemblyId?: str
 // ---- Category (Varg) — hardcoded per spec ----
 
 export const CATEGORIES = [
-  { id: "General", nameEn: "General", nameHi: "सामान्य" },
+  { id: "General", nameEn: "General", nameHi: "सामान्य (GEN)" },
   { id: "OBC", nameEn: "OBC", nameHi: "अन्य पिछड़ा वर्ग (OBC)" },
   { id: "SC", nameEn: "SC", nameHi: "अनुसूचित जाति (SC)" },
   { id: "ST", nameEn: "ST", nameHi: "अनुसूचित जनजाति (ST)" },
-  { id: "EWS", nameEn: "EWS", nameHi: "आर्थिक रूप से कमजोर वर्ग (EWS)" },
-  { id: "Other", nameEn: "Other", nameHi: "अन्य" },
+  // { id: "EWS", nameEn: "EWS", nameHi: "आर्थिक रूप से कमजोर वर्ग (EWS)" },
+  // { id: "Other", nameEn: "Other", nameHi: "अन्य" },
 ] as const;
 
 export type CategoryId = (typeof CATEGORIES)[number]["id"];

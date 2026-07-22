@@ -49,7 +49,7 @@ export function LoginForm() {
           </label>
           <Button type="submit" disabled={pending}>{pending ? "…" : "लॉगिन करें →"}</Button>
           <div className="flex justify-between text-xs">
-            <span className="text-muted">MPIN भूल गए? Admin से संपर्क करें</span>
+            <span className="text-muted">MPIN भूल गए? तकनीकी सहायता हेतु संपर्क करें।</span>
             <Link href="/register" className="font-bold text-secondary hover:underline">नया पंजीकरण</Link>
           </div>
         </div>

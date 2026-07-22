@@ -106,6 +106,7 @@ export function RegisterWizard() {
         </div>
         <div className="mt-2.5 font-serif text-[28px] font-black text-heading">{d.register.title}</div>
         <div className="mt-1 text-sm text-muted">{d.register.subtitle}</div>
+        <div className="mt-2 text-[11px] text-primary-dark">{d.register.disclaimer}</div>
       </div>
 
       <div className="mb-6 flex gap-2">
@@ -156,7 +157,7 @@ export function RegisterWizard() {
                 </Select>
               </div>
               <Err k="dobDay" /><Err k="dobMonth" /><Err k="dobYear" />
-              <div className="mt-1 text-[11px] text-muted">{d.register.ageHint}</div>
+              {/* <div className="mt-1 text-[11px] text-muted">{d.register.ageHint}</div> */}
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
