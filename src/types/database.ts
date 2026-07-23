@@ -63,6 +63,8 @@ export interface Database {
           status: MemberStatus;
           verification_status: VerificationStatus;
           photo_base64: string | null;
+          photo_url: string | null;
+          photo_storage_path: string | null;
           full_name: string;
           father_name: string;
           dob: string;

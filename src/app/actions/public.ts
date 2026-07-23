@@ -11,7 +11,7 @@ export async function verifyMembership(membershipId: string) {
   return {
     membershipId: member.membership_id as string,
     fullName: member.full_name as string,
-    photoBase64: member.photo_base64 as string | null,
+    photoBase64: (member.photo_url as string | null) ?? (member.photo_base64 as string | null),
     districtNameHi: member.district_name_hi as string,
     mandalNameHi: member.mandal_name_hi as string,
     status: member.status as string,

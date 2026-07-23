@@ -30,10 +30,15 @@ export function DashboardClient({
   const [cardScale, setCardScale] = useState(1);
   const [tab, setTab] = useState("card");
   const [siteUrl, setSiteUrl] = useState("");
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<string | null>(member.photo_url ?? null);
 
   useEffect(() => { setSiteUrl(window.location.origin); }, []);
-  useEffect(() => { getMyPhoto().then(setPhoto); }, []);
+  useEffect(() => {
+    // New (Storage-based) members already have photo_url from the page's
+    // initial load — no extra round-trip needed. Only legacy members
+    // (photo_base64 only, no photo_url yet) need the on-demand fetch.
+    if (!member.photo_url) getMyPhoto().then(setPhoto);
+  }, [member.photo_url]);
 
   // Responsive card sizing: MembershipCard itself always renders at its
   // native 400x630 (so html-to-image downloads/shares stay full quality

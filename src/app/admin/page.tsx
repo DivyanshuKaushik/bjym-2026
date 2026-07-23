@@ -34,6 +34,7 @@ export default async function AdminOverviewPage() {
         <KPI label="Deleted" value={kpis.deleted} icon="🗑️" />
         <KPI label="Verified" value={kpis.verified} icon="🛡️" />
         <KPI label="Pending Verification" value={kpis.pending} icon="🕓" />
+        <KPI label="Rejected" value={kpis.rejected} icon="🚫" />
         <KPI label="Male" value={kpis.male} icon="👨" />
         <KPI label="Female" value={kpis.female} icon="👩" />
         <KPI label="Other" value={kpis.other} icon="🧑" />

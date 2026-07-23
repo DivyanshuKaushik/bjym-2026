@@ -1,27 +1,23 @@
 -- =====================================================================
 -- 000012_storage.sql
 --
--- Supabase Storage is INTENTIONALLY NOT used in this project. Member
--- photos are captured client-side (crop + zoom + rotate to a fixed
--- passport ratio, compressed to WebP — see PhotoCropper.tsx), which
--- typically produces a 15-40 KB image, and stored directly as a data
--- URL in members.photo_base64. This keeps the stack simpler (no bucket
--- policies, no signed URLs, no extra round trip) and was an explicit
--- project decision.
+-- UPDATE: this project's original decision to skip Supabase Storage
+-- (documented below) was later revisited — see 000020_photo_storage.sql,
+-- which actually creates the `member-photos` bucket + RLS policies and
+-- adds photo_url/photo_storage_path columns. This file is kept as-is
+-- (still a no-op) for migration-history accuracy; the real Storage setup
+-- lives in 000020.
 --
--- If you outgrow this later (e.g. you want larger/multiple photos per
--- member, or want to serve images via a CDN instead of inline base64),
--- uncomment and run the block below, then switch photo_base64 to a
--- photo_url column and update the upload flow to call Storage instead
--- of writing a data URL.
+-- Original reasoning (no longer current, kept for context): Supabase
+-- Storage was INTENTIONALLY NOT used at first. Member photos were
+-- captured client-side (crop + zoom + rotate to a fixed passport ratio,
+-- compressed to WebP — see PhotoCropper.tsx), which typically produces a
+-- 15-40 KB image, and stored directly as a data URL in
+-- members.photo_base64. That kept the stack simpler early on (no bucket
+-- policies, no signed URLs, no extra round trip) — but at scale (500,000+
+-- members), base64-in-every-row bloated every query result and was the
+-- direct cause of 413/oversized-payload errors, which is why 000020
+-- moves new registrations to Storage instead.
 -- =====================================================================
 
--- insert into storage.buckets (id, name, public)
--- values ('member-photos', 'member-photos', false)
--- on conflict (id) do nothing;
---
--- insert into storage.buckets (id, name, public)
--- values ('generated-idcards', 'generated-idcards', false)
--- on conflict (id) do nothing;
-
-select 1; -- no-op — see comment above
+select 1; -- no-op — see 000020_photo_storage.sql for the actual Storage setup

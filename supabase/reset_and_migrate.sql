@@ -1,8 +1,8 @@
 -- =====================================================================
 -- RESET + MIGRATE IN ONE FILE
 -- Paste this whole file into Supabase SQL Editor for a guaranteed clean
--- setup in a single run: drops any existing app tables/functions first,
--- then applies all 19 migrations in order.
+-- setup in a single run: drops any existing app tables/functions/storage
+-- first, then applies all 20 migrations in order.
 -- =====================================================================
 
 -- =====================================================================
@@ -74,15 +74,26 @@ drop function if exists public.analytics_breakdown_gender() cascade;
 drop function if exists public.analytics_breakdown_jaati(int) cascade;
 drop function if exists public.analytics_age_distribution() cascade;
 drop function if exists public.analytics_cross(text, text) cascade;
+drop function if exists public.admin_dashboard_kpis() cascade;
 
--- ---- Done. Now run the 16 migrations (see README §3 / §13), e.g.: ----
+-- ---- Storage (member-photos bucket + its RLS policies) ----
+-- Only drops what this project itself created — does not touch any
+-- other bucket you may have in the same Supabase project.
+drop policy if exists "member-photos public read" on storage.objects;
+drop policy if exists "member-photos no anon writes" on storage.objects;
+drop policy if exists "member-photos no anon updates" on storage.objects;
+drop policy if exists "member-photos no anon deletes" on storage.objects;
+delete from storage.objects where bucket_id = 'member-photos';
+delete from storage.buckets where id = 'member-photos';
+
+-- ---- Done. Now run the migrations (see README §3 / §13), e.g.: ----
 --   npm run db:push
 -- or paste supabase/run_all_migrations.sql into SQL Editor.
 select 'Reset complete — public schema is now clean. Run the migrations next.' as status;
 
 -- ============ MIGRATIONS START HERE ============
 -- =====================================================================
--- COMBINED MIGRATION FILE — runs all 000001..000019 migrations in order.
+-- COMBINED MIGRATION FILE — runs all 000001..000020 migrations in order.
 -- Paste this ONE file into Supabase SQL Editor instead of running each
 -- file one by one. Safe to re-run (every statement is idempotent).
 --
@@ -789,30 +800,26 @@ alter table public.settings enable row level security;
 -- =====================================================================
 -- 000012_storage.sql
 --
--- Supabase Storage is INTENTIONALLY NOT used in this project. Member
--- photos are captured client-side (crop + zoom + rotate to a fixed
--- passport ratio, compressed to WebP — see PhotoCropper.tsx), which
--- typically produces a 15-40 KB image, and stored directly as a data
--- URL in members.photo_base64. This keeps the stack simpler (no bucket
--- policies, no signed URLs, no extra round trip) and was an explicit
--- project decision.
+-- UPDATE: this project's original decision to skip Supabase Storage
+-- (documented below) was later revisited — see 000020_photo_storage.sql,
+-- which actually creates the `member-photos` bucket + RLS policies and
+-- adds photo_url/photo_storage_path columns. This file is kept as-is
+-- (still a no-op) for migration-history accuracy; the real Storage setup
+-- lives in 000020.
 --
--- If you outgrow this later (e.g. you want larger/multiple photos per
--- member, or want to serve images via a CDN instead of inline base64),
--- uncomment and run the block below, then switch photo_base64 to a
--- photo_url column and update the upload flow to call Storage instead
--- of writing a data URL.
+-- Original reasoning (no longer current, kept for context): Supabase
+-- Storage was INTENTIONALLY NOT used at first. Member photos were
+-- captured client-side (crop + zoom + rotate to a fixed passport ratio,
+-- compressed to WebP — see PhotoCropper.tsx), which typically produces a
+-- 15-40 KB image, and stored directly as a data URL in
+-- members.photo_base64. That kept the stack simpler early on (no bucket
+-- policies, no signed URLs, no extra round trip) — but at scale (500,000+
+-- members), base64-in-every-row bloated every query result and was the
+-- direct cause of 413/oversized-payload errors, which is why 000020
+-- moves new registrations to Storage instead.
 -- =====================================================================
 
--- insert into storage.buckets (id, name, public)
--- values ('member-photos', 'member-photos', false)
--- on conflict (id) do nothing;
---
--- insert into storage.buckets (id, name, public)
--- values ('generated-idcards', 'generated-idcards', false)
--- on conflict (id) do nothing;
-
-select 1; -- no-op — see comment above
+select 1; -- no-op — see 000020_photo_storage.sql for the actual Storage setup
 
 
 -- ============ FROM: 000013_seed.sql ============
@@ -1155,46 +1162,158 @@ create index if not exists idx_members_trgm_email on public.members using gin (e
 create index if not exists idx_members_trgm_referral_code on public.members using gin (referral_code gin_trgm_ops);
 
 
--- ============ FROM: 000019_membership_id_7_digits.sql ============
+-- ============ FROM: 000019_dashboard_kpis.sql ============
 -- =====================================================================
--- 000019_membership_id_7_digits.sql
+-- 000019_dashboard_kpis.sql
 --
--- Bumps the membership ID serial padding from 6 digits to 7, ahead of
--- the 10-lakh (10,00,000 / 1,000,000) user target.
+-- FIX for incorrect/inconsistent dashboard counts (e.g. "Today" showing
+-- more members than "This Week"/"This Month", which is logically
+-- impossible under correct date-range logic since today is always
+-- inside this week and this month).
 --
--- Note on why this was necessary at all: `lpad(next_serial::text, 6, '0')`
--- does NOT truncate — it only pads UP TO a minimum width. Serial 1000000
--- (7 digits) already produced 'BJYM-CG-2026-1000000' correctly even with
--- the old 6-digit padding; nothing would have broken or been cut off past
--- 999999. This migration is a presentation choice, not a bug fix: with a
--- 10-lakh target, most real IDs will be 7 digits anyway, so starting the
--- padding at 7 from the get-go keeps every ID the same length (and
--- therefore visually consistent on the ID card, in exports, in search
--- results, etc.) all the way up to 99,99,999 members, instead of member
--- #1 through #999,999 looking shorter than member #1,000,000 onward.
+-- The previous implementation ran 12 SEPARATE count queries from
+-- Node.js, computing "today"/"week"/"month" boundaries with
+-- `new Date(...)` in the serverless function's own clock/timezone, then
+-- comparing against `created_at` (a Postgres timestamptz). Two rows of
+-- bugs live in that gap: (1) any clock/timezone skew between the
+-- Node runtime and Postgres, and (2) nothing guaranteed the 12 queries'
+-- results were even internally consistent with each other since they's
+-- independent round-trips.
 --
--- `create or replace function` — safe to re-run, and applies immediately
--- to the very next membership_id generated after this migration runs.
--- Every ID generated *before* this migration keeps its original (6-digit-
--- padded, or organically-longer) value; this only changes the padding
--- width used going forward, nothing is renumbered or backfilled.
+-- This migration replaces all of that with ONE query, computed entirely
+-- inside Postgres against its own `now()`, so "today" is unambiguously a
+-- subset of "this week" is a subset of "this month" by construction —
+-- and it's one round-trip instead of twelve, which also matters at
+-- 500,000+ rows.
+--
+-- NOTE: if `total` still looks wrong after this fix, that means the
+-- *data* has an issue, not the query — run this to check for it:
+--   select count(*) from public.members where deleted_at is not null and status <> 'Deleted';
+-- (Members with deleted_at set but status still 'Active'/'Suspended'
+-- would be excluded from `total` here, matching the old base() behavior,
+-- while still showing up in `active`/`suspended` — if that diagnostic
+-- query returns > 0, some rows have deleted_at populated without the
+-- status actually being 'Deleted', usually from a bulk import/seed
+-- script that set every column from a template including deleted_at.)
 -- =====================================================================
 
-create or replace function public.generate_membership_id()
-returns text
-language plpgsql
+create or replace function public.admin_dashboard_kpis()
+returns table (
+  total bigint,
+  today bigint,
+  week bigint,
+  month bigint,
+  active bigint,
+  suspended bigint,
+  deleted bigint,
+  male bigint,
+  female bigint,
+  other bigint,
+  verified bigint,
+  pending bigint,
+  rejected bigint,
+  referral_count bigint
+)
+language sql
 security definer set search_path = public
+stable
 as $$
-declare
-  cur_year int := extract(year from now());
-  next_serial int;
-begin
-  insert into public.membership_sequences (year, last_serial)
-  values (cur_year, 1)
-  on conflict (year) do update set last_serial = public.membership_sequences.last_serial + 1
-  returning last_serial into next_serial;
-
-  return 'BJYM-CG-' || cur_year || '-' || lpad(next_serial::text, 7, '0');
-end;
+  select
+    count(*) filter (where deleted_at is null) as total,
+    count(*) filter (where deleted_at is null and created_at >= date_trunc('day', now())) as today,
+    count(*) filter (where deleted_at is null and created_at >= now() - interval '7 days') as week,
+    count(*) filter (where deleted_at is null and created_at >= now() - interval '30 days') as month,
+    count(*) filter (where status = 'Active') as active,
+    count(*) filter (where status = 'Suspended') as suspended,
+    count(*) filter (where status = 'Deleted') as deleted,
+    count(*) filter (where deleted_at is null and gender = 'Male') as male,
+    count(*) filter (where deleted_at is null and gender = 'Female') as female,
+    count(*) filter (where deleted_at is null and gender = 'Other') as other,
+    count(*) filter (where deleted_at is null and verification_status = 'Verified') as verified,
+    count(*) filter (where deleted_at is null and verification_status = 'Pending') as pending,
+    count(*) filter (where deleted_at is null and verification_status = 'Rejected') as rejected,
+    (select count(*) from public.member_referrals) as referral_count
+  from public.members;
 $$;
+
+grant execute on function public.admin_dashboard_kpis() to service_role;
+
+-- Supports the `today`/`week`/`month` FILTER clauses above at scale.
+create index if not exists idx_members_created_at_status on public.members(created_at, status) where deleted_at is null;
+
+
+-- ============ FROM: 000020_photo_storage.sql ============
+-- =====================================================================
+-- 000020_photo_storage.sql
+--
+-- Moves member photos out of the database (base64 text in `photo_base64`,
+-- which bloated every row and every query result) and into Supabase
+-- Storage instead. This migration is purely ADDITIVE and non-breaking:
+--
+--   - `photo_base64` is untouched — existing members keep working exactly
+--     as before, no data is moved or deleted by this migration.
+--   - Two new nullable columns are added: `photo_url` (the URL the app
+--     should render) and `photo_storage_path` (the object path inside
+--     the bucket, needed to delete/replace/re-sign the file later).
+--   - New registrations (after this migration + the matching app-code
+--     deploy) write ONLY photo_url/photo_storage_path, leaving
+--     photo_base64 null.
+--   - A later, separate, standalone script (scripts/migrate-photos.mjs)
+--     backfills existing photo_base64 rows into Storage at your own
+--     pace — this migration does not run that automatically.
+-- =====================================================================
+
+alter table public.members add column if not exists photo_url text;
+alter table public.members add column if not exists photo_storage_path text;
+
+create index if not exists idx_members_photo_url on public.members(photo_url) where photo_url is not null;
+
+-- ---- Storage bucket ----
+-- Public-READ bucket: a member's own digital ID card photo is meant to
+-- be shown/shared (that's the whole point of a "digital membership
+-- card"), similar in sensitivity to a LinkedIn profile photo — so public
+-- read access on a per-object basis (object paths aren't listable/
+-- browsable, only fetchable if you already have the exact path/URL) is
+-- an acceptable, much simpler default than signed URLs with expiry
+-- management. Writes are still locked down below. If you'd rather keep
+-- photos fully private, switch `public` to `false` here and generate
+-- short-lived signed URLs server-side instead (the app's repository
+-- layer already isolates all photo reads/writes behind a couple of
+-- functions, so that swap is contained — see src/lib/storage/photos.ts).
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('member-photos', 'member-photos', true, 2097152, array['image/webp', 'image/jpeg', 'image/png'])
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- ---- Storage RLS ----
+-- This app never uses the Supabase anon/authenticated client roles at
+-- all (every DB/Storage call goes through the service-role key,
+-- server-side only — see src/lib/db/client.ts) — the service role
+-- bypasses RLS entirely regardless of these policies. They exist as
+-- defense-in-depth / explicit documentation of intent, in case this
+-- project's Storage is ever accessed a different way in the future:
+-- public can READ objects in this bucket (needed for member/public ID
+-- card photo display), but only the service role can write.
+
+drop policy if exists "member-photos public read" on storage.objects;
+create policy "member-photos public read"
+  on storage.objects for select
+  using (bucket_id = 'member-photos');
+
+drop policy if exists "member-photos no anon writes" on storage.objects;
+create policy "member-photos no anon writes"
+  on storage.objects for insert
+  with check (bucket_id = 'member-photos' and auth.role() = 'service_role');
+
+drop policy if exists "member-photos no anon updates" on storage.objects;
+create policy "member-photos no anon updates"
+  on storage.objects for update
+  using (bucket_id = 'member-photos' and auth.role() = 'service_role');
+
+drop policy if exists "member-photos no anon deletes" on storage.objects;
+create policy "member-photos no anon deletes"
+  on storage.objects for delete
+  using (bucket_id = 'member-photos' and auth.role() = 'service_role');
 

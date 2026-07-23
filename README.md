@@ -71,7 +71,7 @@ from a partial earlier attempt silently conflicting with a fresh run).
    - paste `supabase/run_all_migrations.sql` (all 16, in order) into a new
      SQL Editor query and Run, **or**
    - paste `supabase/reset_and_migrate.sql` instead of doing steps 2+3
-     separately — it's reset.sql followed by all 18 migrations in one file, **or**
+     separately — it's reset.sql followed by all 20 migrations in one file, **or**
    - `npm run db:push` via the Supabase CLI (applies
      `supabase/migrations/*.sql` in filename order automatically).
 4. Seed the default Master Admin — **either**:
@@ -124,6 +124,10 @@ from a partial earlier attempt silently conflicting with a fresh run).
 - `000018_search_fix.sql` — `pg_trgm` trigram indexes backing reliable
   ILIKE substring search on membership ID/name/mobile/email/referral code
   — see §16
+- `000019_dashboard_kpis.sql` — single-query dashboard KPI function,
+  replacing 12 separate client-side-date-math count queries — see §17
+- `000020_photo_storage.sql` — `photo_url`/`photo_storage_path` columns
+  + the `member-photos` Storage bucket and its RLS policies — see §17
 
 ## 4. Local development
 
@@ -358,7 +362,7 @@ src/
     i18n/                     Hindi/English dictionary + provider
   types/database.ts           Hand-authored DB types (see §3 re: db:generate-types)
 supabase/
-  migrations/000001..000018.sql
+  migrations/000001..000020.sql
   seed.sql                    Default Master Admin (pgcrypto bcrypt, matches bcryptjs)
   config.toml
 scripts/create-admin.mjs      Node alternative to `db:seed` for the Master Admin
@@ -377,14 +381,14 @@ cp .env.example .env.local        # fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_
 
 # 1. Reset (SQL Editor -> paste supabase/reset.sql -> Run) — safe even on a brand-new project
 # 2. Migrate: paste supabase/run_all_migrations.sql into SQL Editor, OR:
-npm run db:push                   # applies all 18 migrations in filename order
+npm run db:push                   # applies all 20 migrations in filename order
 # ...or do both 1+2 in one paste: supabase/reset_and_migrate.sql
 
 npm run db:seed                   # or: npm run create-admin
 npm run dev
 ```
 
-Migrations 000001-000006 and 000008-000018 always do real work.
+Migrations 000001-000006 and 000008-000020 always do real work.
 `000007_repair_legacy_tables.sql` only matters if this Supabase project
 previously ran an older version of this schema (patches
 `activity_logs`/`settings` if they're in an old shape) — it's a no-op on
@@ -679,5 +683,138 @@ rough and it's a contained fix.
   can't suspend/activate/browse members — see §16). It now only renders
   when `permissions.includes(PERMISSIONS.MEMBERS_VIEW)`
   (`AdminLayout` → `AdminTopbar`'s new `canSearchMembers` prop).
+
+## 17. Phase 7 — dashboard KPI fix, Supabase Storage for photos
+
+### Dashboard counts
+
+The previous `kpis()` ran **12 separate count queries** from Node.js,
+computing "today"/"this week"/"this month" boundaries with `new Date(...)`
+in the serverless function's own clock, then comparing against
+`created_at` in Postgres. That gap is exactly where an internally
+inconsistent result like *"Today: 7535, This Week: 0, This Month: 0"*
+(logically impossible — today is always inside this week and this
+month) could come from: 12 independent round-trips give no guarantee of
+mutual consistency, and any clock/timezone skew between the Node runtime
+and Postgres compounds it.
+
+Fixed: `admin_dashboard_kpis()` (migration `000019_dashboard_kpis.sql`) —
+**one** SQL function, using `count(*) filter (where ...)` so every metric
+is computed from the same single pass over the table, against Postgres's
+own `now()`. This can't produce a week-count smaller than a day-count by
+construction, and it's 1 round-trip instead of 13 (also meaningfully
+faster at 500,000+ rows). `memberRepository.kpis()` now just calls this
+RPC.
+
+**If `Total Members` still looks wrong after this fix**, that's a data
+issue, not a query issue — run this in SQL Editor to check:
+```sql
+select count(*) from public.members where deleted_at is not null and status <> 'Deleted';
+```
+A non-zero result means some rows have `deleted_at` populated without
+`status` actually being `'Deleted'` — typically from a bulk import/seed
+script that set every column from one template including `deleted_at`.
+`total` (and several other KPIs) deliberately exclude soft-deleted rows
+(`deleted_at is null`), while `active`/`suspended`/`deleted` key off
+`status` directly — that mismatch is what produces a low `total` next to
+a much higher `active`.
+
+### Photo storage — moved to Supabase Storage
+
+Member photos were stored as base64 text directly in `members.photo_base64`
+— simple early on, but every query that touched a member row (list pages,
+exports, KPI-adjacent queries) paid the cost of that blob even when it
+never displayed a photo. At 500,000+ members this was the direct cause of
+413/oversized-payload errors (see §16's Members-list fix, which stopped
+*querying* photo_base64 unnecessarily — this phase goes further and
+stops *storing new ones there* at all).
+
+**Non-breaking, additive migration** (`000020_photo_storage.sql`):
+- Two new nullable columns: `photo_url`, `photo_storage_path`.
+  `photo_base64` is untouched — existing members keep working exactly as
+  before.
+- A `member-photos` Storage bucket, public-read (a digital membership
+  card's photo is meant to be shown/shared — similar sensitivity to a
+  LinkedIn photo — so plain public URLs are a deliberately simpler choice
+  than signed-URL expiry management; switch `public` to `false` in the
+  migration and add signing in `src/lib/storage/photos.ts` if you'd
+  rather keep it private), max 2 MB, WebP/JPEG/PNG only.
+- RLS policies on `storage.objects`: public **read**, service-role-only
+  **write**. This app's Postgres/Storage access is 100% service-role
+  (no anon/authenticated client anywhere — see `src/lib/db/client.ts`),
+  so these policies are defense-in-depth/documentation, not something
+  the app's own requests depend on.
+
+**New registrations** (`src/app/actions/register.ts`): the cropped/
+compressed WebP photo (already produced client-side by `PhotoCropper.tsx`
+— crop/zoom/rotate to a fixed passport ratio, canvas-encoded to WebP) is
+uploaded via `uploadMemberPhoto()` (`src/lib/storage/photos.ts`) instead
+of being written straight to `photo_base64`. If the member row creation
+fails afterward for any reason, the just-uploaded photo is deleted so it
+doesn't become an orphaned Storage object. No new server-side image
+library (e.g. `sharp`) was introduced — the client-side canvas
+compression is the real compression step; the server just validates size
+(2 MB ceiling, matching the bucket's own limit) as a safety net.
+
+**Existing members** keep reading from `photo_base64` until migrated —
+nothing forces an immediate cutover.
+
+**On-demand reads, now URL-first**: `photo_url` is lightweight (a short
+string) so it's included directly in `LIST_COLUMNS` — new members' photos
+show up instantly in lists/detail pages/the dashboard with no extra
+round-trip at all. Legacy members (base64-only, no `photo_url` yet) still
+use the on-demand fetch pattern from §16 (`getPhotoById` now checks
+`photo_url` first, falling back to `photo_base64`) — `DashboardClient`
+and `MemberDetailClient` both skip that extra fetch entirely whenever
+`photo_url` is already present.
+
+**Backfill script** (`scripts/migrate-photos.mjs`, `npm run migrate-photos`):
+reads members where `photo_base64 IS NOT NULL AND photo_url IS NULL`,
+uploads each to Storage, and only clears `photo_base64` after the row
+update succeeds. Resumable by construction — that same WHERE clause
+means already-migrated rows are automatically skipped on any re-run, no
+separate checkpoint file needed. Detailed per-row logging to both the
+console and a dated log file. Flags: `--batch-size=N` (default 50),
+`--limit=N` (process only N rows, for testing), `--dry-run` (log what
+would happen, no writes). Run it whenever you're ready — there's no time
+pressure, since new registrations already work correctly without it.
+
+### Environment variables
+
+No new environment variables — Storage uploads/reads reuse the existing
+`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` service-role client
+(`src/lib/db/client.ts` already exposes `.storage` via the same
+`createClient()` instance used for every Postgres query).
+
+### Follow-up fixes: three spots that still only checked `photo_base64`
+
+A pass through every remaining photo-consuming code path found three
+places that were written before `photo_url` existed and hadn't been
+updated to the URL-first-with-fallback pattern — meaning a **new**
+member (photo_url only, no photo_base64) would have shown no photo at
+all in these three specific spots, even though everything else (dashboard,
+member detail, ID card) already handled it correctly:
+
+- **`memberRepository.verifyPublic`** (the public `/verify` page) was
+  only selecting `photo_base64` — added `photo_url` to the select, and
+  `src/app/actions/public.ts` now prefers it, falling back to
+  `photo_base64`.
+- **`MembersTable.tsx`** (admin Members list) was passing
+  `m.photo_base64` to the list avatar — but `photo_base64` is
+  deliberately excluded from `LIST_COLUMNS` (see §16), so this always
+  rendered initials for *every* member, old or new. Switched to
+  `m.photo_url`, which *is* in `LIST_COLUMNS` — new members now get a
+  real thumbnail in the list at no extra query cost; pre-migration
+  members still show initials here specifically (their full photo still
+  loads correctly on the detail page, on demand).
+- **`VerificationQueue.tsx`** was passing `m.photo_base64` only, for both
+  the table thumbnail and the click-to-enlarge lightbox — a new member
+  pending verification would have shown no photo at all, which defeats
+  the purpose of a verification review. Now checks `m.photo_url ||
+  m.photo_base64` in both places.
+
+Also added the **Rejected** KPI card to the admin Overview page — the
+`admin_dashboard_kpis()` SQL function (§17 above) already computed it,
+it just hadn't been wired into the grid of `<KPI>` cards.
 
 Built by Techxos · techxos.in

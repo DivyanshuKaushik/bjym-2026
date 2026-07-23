@@ -67,8 +67,19 @@ drop function if exists public.analytics_breakdown_gender() cascade;
 drop function if exists public.analytics_breakdown_jaati(int) cascade;
 drop function if exists public.analytics_age_distribution() cascade;
 drop function if exists public.analytics_cross(text, text) cascade;
+drop function if exists public.admin_dashboard_kpis() cascade;
 
--- ---- Done. Now run the 16 migrations (see README §3 / §13), e.g.: ----
+-- ---- Storage (member-photos bucket + its RLS policies) ----
+-- Only drops what this project itself created — does not touch any
+-- other bucket you may have in the same Supabase project.
+drop policy if exists "member-photos public read" on storage.objects;
+drop policy if exists "member-photos no anon writes" on storage.objects;
+drop policy if exists "member-photos no anon updates" on storage.objects;
+drop policy if exists "member-photos no anon deletes" on storage.objects;
+delete from storage.objects where bucket_id = 'member-photos';
+delete from storage.buckets where id = 'member-photos';
+
+-- ---- Done. Now run the migrations (see README §3 / §13), e.g.: ----
 --   npm run db:push
 -- or paste supabase/run_all_migrations.sql into SQL Editor.
 select 'Reset complete — public schema is now clean. Run the migrations next.' as status;

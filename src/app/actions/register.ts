@@ -2,6 +2,7 @@
 
 import { fullRegistrationSchema } from "@/lib/validators/registration";
 import { memberRepository } from "@/lib/repositories/member.repository";
+import { uploadMemberPhoto, deleteMemberPhoto } from "@/lib/storage/photos";
 import { findHierarchyLabels } from "@/data/hierarchy";
 import { findLokSabhaLabel } from "@/data/loksabha";
 import { signIn } from "@/lib/auth";
@@ -47,8 +48,15 @@ export async function registerMember(input: unknown): Promise<RegisterState> {
   const dob = `${data.dobYear}-${data.dobMonth}-${data.dobDay}`;
   const mpinHash = await memberRepository.hashMpin(data.mpin);
 
+  // New registrations go to Supabase Storage — photo_base64 is left null.
+  // Existing (pre-migration) members keep working off photo_base64 until
+  // the standalone backfill script (scripts/migrate-photos.mjs) runs.
+  const uploaded = await uploadMemberPhoto(data.photoBase64);
+  if ("error" in uploaded) return { error: uploaded.error, fieldErrors: { photoBase64: uploaded.error } };
+
   const { member, error } = await memberRepository.create({
-    photo_base64: data.photoBase64,
+    photo_url: uploaded.url,
+    photo_storage_path: uploaded.path,
     full_name: data.fullName,
     father_name: data.fatherName,
     dob,
@@ -84,6 +92,7 @@ export async function registerMember(input: unknown): Promise<RegisterState> {
   });
 
   if (error || !member) {
+    await deleteMemberPhoto(uploaded.path);
     if (error?.includes("mobile")) return { error: "यह मोबाइल नंबर पहले से पंजीकृत है" };
     if (error?.includes("email")) return { error: "यह ईमेल पहले से पंजीकृत है" };
     return { error: error || "पंजीकरण में त्रुटि हुई। कृपया दोबारा प्रयास करें।" };

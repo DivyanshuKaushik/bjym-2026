@@ -19,6 +19,7 @@ const MEMBER_COLUMNS = "*";
  *  `MEMBER_COLUMNS` ("*"). */
 const LIST_COLUMNS = [
   "id", "membership_id", "status", "verification_status",
+  "photo_url", "photo_storage_path",
   "full_name", "father_name", "dob", "gender", "category", "jaati",
   "mobile", "whatsapp", "email",
   "loksabha_id", "loksabha_name_en", "loksabha_name_hi",
@@ -72,8 +73,9 @@ export const memberRepository = {
   },
 
   async getPhotoById(id: string) {
-    const { data } = await db().from("members").select("photo_base64").eq("id", id).maybeSingle();
-    return (data as { photo_base64: string | null } | null)?.photo_base64 ?? null;
+    const { data } = await db().from("members").select("photo_url, photo_base64").eq("id", id).maybeSingle();
+    const row = data as { photo_url: string | null; photo_base64: string | null } | null;
+    return row?.photo_url ?? row?.photo_base64 ?? null;
   },
 
   async findByMembershipId(membershipId: string) {
@@ -245,7 +247,7 @@ export const memberRepository = {
   async verifyPublic(membershipId: string) {
     const { data } = await db()
       .from("members")
-      .select("membership_id, full_name, photo_base64, district_name_hi, mandal_name_hi, status, verification_status, created_at")
+      .select("membership_id, full_name, photo_url, photo_base64, district_name_hi, mandal_name_hi, status, verification_status, created_at")
       .eq("membership_id", membershipId)
       .maybeSingle();
     return data;
@@ -254,52 +256,27 @@ export const memberRepository = {
   // ---- KPIs / analytics ----
 
   async kpis() {
-    const client = db();
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
-    const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString();
-
-    const base = () => client.from("members").select("*", { count: "exact", head: true }).is("deleted_at", null);
-
-    const [
-      total, today, week, month, active, suspended, deleted,
-      male, female, other, verified, pending,
-    ] = await Promise.all([
-      base(),
-      base().gte("created_at", todayStart.toISOString()),
-      base().gte("created_at", weekAgo),
-      base().gte("created_at", monthAgo),
-      client.from("members").select("*", { count: "exact", head: true }).eq("status", "Active"),
-      client.from("members").select("*", { count: "exact", head: true }).eq("status", "Suspended"),
-      client.from("members").select("*", { count: "exact", head: true }).eq("status", "Deleted"),
-      base().eq("gender", "Male"),
-      base().eq("gender", "Female"),
-      base().eq("gender", "Other"),
-      base().eq("verification_status", "Verified"),
-      base().eq("verification_status", "Pending"),
-    ]);
-
-    const { count: referralCount } = await client.from("member_referrals").select("*", { count: "exact", head: true });
-
-    const totalCount = total.count ?? 0;
-    const conversionPct = totalCount > 0 ? (((referralCount ?? 0) / totalCount) * 100).toFixed(1) : "0.0";
-
+    const { data, error } = await db().rpc("admin_dashboard_kpis").single();
+    if (error || !data) {
+      return {
+        total: 0, today: 0, week: 0, month: 0, active: 0, suspended: 0, deleted: 0,
+        male: 0, female: 0, other: 0, verified: 0, pending: 0, rejected: 0,
+        referralCount: 0, conversionPct: "0.0",
+      };
+    }
+    const row = data as {
+      total: number; today: number; week: number; month: number;
+      active: number; suspended: number; deleted: number;
+      male: number; female: number; other: number;
+      verified: number; pending: number; rejected: number; referral_count: number;
+    };
+    const conversionPct = row.total > 0 ? ((row.referral_count / row.total) * 100).toFixed(1) : "0.0";
     return {
-      total: totalCount,
-      today: today.count ?? 0,
-      week: week.count ?? 0,
-      month: month.count ?? 0,
-      active: active.count ?? 0,
-      suspended: suspended.count ?? 0,
-      deleted: deleted.count ?? 0,
-      male: male.count ?? 0,
-      female: female.count ?? 0,
-      other: other.count ?? 0,
-      verified: verified.count ?? 0,
-      pending: pending.count ?? 0,
-      referralCount: referralCount ?? 0,
-      conversionPct,
+      total: row.total, today: row.today, week: row.week, month: row.month,
+      active: row.active, suspended: row.suspended, deleted: row.deleted,
+      male: row.male, female: row.female, other: row.other,
+      verified: row.verified, pending: row.pending, rejected: row.rejected,
+      referralCount: row.referral_count, conversionPct,
     };
   },
 

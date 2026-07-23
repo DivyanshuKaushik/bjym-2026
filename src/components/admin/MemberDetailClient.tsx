@@ -28,13 +28,14 @@ export function MemberDetailClient({ member, referrals }: { member: MemberRow; r
   // Photo is deliberately NOT part of the initial page load (see
   // memberRepository.findByIdIncludingDeleted) — fetched on demand here so
   // the rest of the detail page renders immediately without waiting on it.
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [photoLoading, setPhotoLoading] = useState(true);
+  const [photo, setPhoto] = useState<string | null>(member.photo_url ?? null);
+  const [photoLoading, setPhotoLoading] = useState(!member.photo_url);
   useEffect(() => {
+    if (member.photo_url) { setPhoto(member.photo_url); setPhotoLoading(false); return; }
     setPhoto(null);
     setPhotoLoading(true);
     getMemberPhotoForAdmin(member.id).then((p) => { setPhoto(p); setPhotoLoading(false); });
-  }, [member.id]);
+  }, [member.id, member.photo_url]);
 
   const run = (fn: () => Promise<{ error?: string | null }>, onOk?: () => void) => {
     setError(null); setMsg(null);

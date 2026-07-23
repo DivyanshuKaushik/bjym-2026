@@ -74,7 +74,7 @@ export function MembersTable({ members, total }: { members: MemberRow[]; total: 
               <tr key={m.id} className="border-b border-border">
                 <td className="p-2.5">
                   <Link href={`/admin/members/${m.id}`} className="flex items-center gap-2 font-bold text-heading hover:underline">
-                    <Avatar name={m.full_name} photo={m.photo_base64} size={28} />
+                    <Avatar name={m.full_name} photo={m.photo_url} size={28} />
                     {m.full_name}
                   </Link>
                 </td>

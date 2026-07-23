@@ -66,10 +66,13 @@ export function VerificationQueue({
                 <tr key={m.id} className="border-b border-border align-middle">
                   <td className="p-2.5">
                     <button
-                      onClick={() => m.photo_base64 && setLightboxPhoto({ src: m.photo_base64, name: m.full_name })}
+                      onClick={() => {
+                        const src = m.photo_url || m.photo_base64;
+                        if (src) setLightboxPhoto({ src, name: m.full_name });
+                      }}
                       title="बड़ा करके देखें"
                     >
-                      <Avatar name={m.full_name} photo={m.photo_base64} size={44} square />
+                      <Avatar name={m.full_name} photo={m.photo_url || m.photo_base64} size={44} square />
                     </button>
                   </td>
                   <td className="whitespace-nowrap p-2.5 font-bold text-navy">{m.membership_id}</td>
