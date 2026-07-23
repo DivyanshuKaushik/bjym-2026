@@ -153,7 +153,7 @@ export function Footer() {
                                         href="tel:+919109881465"
                                         className="font-bold text-primary-dark hover:underline"
                                     >
-                                        +91 91098 81465
+                                        +91 91098 81465 (प्रातः 11:00 बजे से सायं 6:00 बजे तक)
                                     </a>
                                 </span>
                             </li>
