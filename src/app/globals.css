@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* This site is intentionally light-mode-only — there is no dark theme
+   built. Without this declaration, some browsers/OSes (notably Android
+   Chrome's "Force Dark" / auto-dark-theme-for-web-contents feature, and
+   similar heuristic dark modes on some Samsung/Xiaomi phones) will guess
+   at a dark palette for any page that doesn't explicitly say it only
+   supports light — inverting/adjusting colors it doesn't recognize as
+   "already dark-mode-aware". That's what was making the ID card's text
+   unreadable on some devices even though this codebase has no dark mode
+   CSS at all. `color-scheme: light` (plus the matching `viewport.colorScheme`
+   in layout.tsx, which emits the equivalent <meta name="color-scheme">)
+   tells the browser this page is light-only, so it stops guessing. */
+:root, html {
+  color-scheme: light only;
+}
+
 html, body {
   background-color: #FAF8F4;
 }

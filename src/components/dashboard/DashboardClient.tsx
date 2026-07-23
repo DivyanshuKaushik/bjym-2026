@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { changeMpin, recordIdCardDownload } from "@/app/actions/member";
+import { changeMpin, recordIdCardDownload, getMyPhoto } from "@/app/actions/member";
 import { logoutEverywhere } from "@/app/actions/logout";
 import { formatDate, formatDateNumeric } from "@/lib/utils";
 import type { MemberRow } from "@/lib/repositories/member.repository";
@@ -26,10 +26,29 @@ export function DashboardClient({
 }) {
   const { d } = useLang();
   const cardRef = useRef<HTMLDivElement>(null);
+  const cardWrapperRef = useRef<HTMLDivElement>(null);
+  const [cardScale, setCardScale] = useState(1);
   const [tab, setTab] = useState("card");
   const [siteUrl, setSiteUrl] = useState("");
+  const [photo, setPhoto] = useState<string | null>(null);
 
   useEffect(() => { setSiteUrl(window.location.origin); }, []);
+  useEffect(() => { getMyPhoto().then(setPhoto); }, []);
+
+  // Responsive card sizing: MembershipCard itself always renders at its
+  // native 400x630 (so html-to-image downloads/shares stay full quality
+  // regardless of screen size) — only this wrapper's CSS transform
+  // shrinks it visually to fit narrow phones (320-375px viewports),
+  // never upscales past 1.
+  useEffect(() => {
+    const el = cardWrapperRef.current;
+    if (!el) return;
+    const compute = () => setCardScale(Math.min(1, el.offsetWidth / 400));
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const cardData = {
     membershipId: member.membership_id,
@@ -37,7 +56,7 @@ export function DashboardClient({
     dob: formatDateNumeric(member.dob),
     districtNameHi: member.district_name_hi,
     mandalNameHi: member.mandal_name_hi,
-    photoBase64: member.photo_base64,
+    photoBase64: photo,
     signatoryName,
     signatoryTitleHi,
     portalWebsite,
@@ -83,8 +102,12 @@ export function DashboardClient({
 
       {tab === "card" && (
         <div className="text-center">
-          <div className="mx-auto w-fit">
-            <MembershipCard data={cardData} ref={cardRef} />
+          <div ref={cardWrapperRef} className="mx-auto w-full max-w-[400px]">
+            <div style={{ width: 400 * cardScale, height: 630 * cardScale, overflow: "hidden", margin: "0 auto" }}>
+              <div style={{ transform: `scale(${cardScale})`, transformOrigin: "top left" }}>
+                <MembershipCard data={cardData} ref={cardRef} />
+              </div>
+            </div>
           </div>
           <div className="mt-7">
             <DownloadCardButtons

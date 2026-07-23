@@ -8,6 +8,32 @@ export type MemberInsert = Database["public"]["Tables"]["members"]["Insert"];
 
 const MEMBER_COLUMNS = "*";
 
+/** Used for list/table views (Members list, KPI counts, analytics, exports'
+ *  preview) — everything EXCEPT `photo_base64` (can be tens of KB per row;
+ *  utterly unnecessary for a 28px list avatar and was the direct cause of
+ *  413/oversized-payload errors on the Members list), `mpin_hash` (never
+ *  needed client-side), and `search_vector` (internal full-text index,
+ *  not used by app code at all anymore — see 000018_search_fix.sql).
+ *  Single-record reads that genuinely need the photo (member detail,
+ *  the member's own dashboard/ID card, verification review) still use
+ *  `MEMBER_COLUMNS` ("*"). */
+const LIST_COLUMNS = [
+  "id", "membership_id", "status", "verification_status",
+  "full_name", "father_name", "dob", "gender", "category", "jaati",
+  "mobile", "whatsapp", "email",
+  "loksabha_id", "loksabha_name_en", "loksabha_name_hi",
+  "district_id", "district_name_en", "district_name_hi",
+  "assembly_id", "assembly_name_en", "assembly_name_hi",
+  "mandal_id", "mandal_name_en", "mandal_name_hi",
+  "booth", "address", "pincode",
+  "token_version", "referral_code", "referred_by_code", "referral_count",
+  "qr_generated", "id_card_generated", "last_login",
+  "registration_source", "language_preference", "rejection_reason",
+  "created_at", "updated_at", "deleted_at",
+  "created_by", "updated_by", "verified_by", "verified_at",
+  "suspended_by", "suspended_at", "rejected_by", "rejected_at", "deleted_by",
+].join(", ");
+
 export const memberRepository = {
   async create(data: MemberInsert): Promise<{ member: MemberRow | null; error: string | null }> {
     const { data: row, error } = await db().from("members").insert(data).select(MEMBER_COLUMNS).single();
@@ -15,14 +41,39 @@ export const memberRepository = {
     return { member: row as MemberRow, error: null };
   },
 
+  /** Used on page load for the member's own dashboard — deliberately
+   *  excludes photo_base64. The dashboard fetches the photo separately
+   *  (see getPhotoById below) once the rest of the page has already
+   *  rendered, so a slow/large photo never blocks the initial paint. */
   async findById(id: string) {
-    const { data } = await db().from("members").select(MEMBER_COLUMNS).eq("id", id).is("deleted_at", null).maybeSingle();
-    return data as MemberRow | null;
+    const { data } = await db().from("members").select(LIST_COLUMNS).eq("id", id).is("deleted_at", null).maybeSingle();
+    return data as unknown as MemberRow | null;
   },
 
+  /** Used on page load for the admin Member Detail page — same
+   *  photo-excluded/on-demand treatment as findById above. */
   async findByIdIncludingDeleted(id: string) {
-    const { data } = await db().from("members").select(MEMBER_COLUMNS).eq("id", id).maybeSingle();
-    return data as MemberRow | null;
+    const { data } = await db().from("members").select(LIST_COLUMNS).eq("id", id).maybeSingle();
+    return data as unknown as MemberRow | null;
+  },
+
+  /** On-demand photo fetch — called client-side, after the surrounding
+   *  page (dashboard or admin detail) has already rendered its text
+   *  content, so the (potentially large) base64 photo is never part of
+   *  the initial page payload. */
+  /** Server-only, minimal fields for the change-MPIN flow (needs
+   *  mpin_hash to verify the current MPIN, and mobile to re-sign-in
+   *  after a successful change). Deliberately separate from findById(),
+   *  whose result is passed straight into a client component's props —
+   *  mpin_hash must never end up there. */
+  async authFieldsById(id: string) {
+    const { data } = await db().from("members").select("id, mobile, mpin_hash").eq("id", id).is("deleted_at", null).maybeSingle();
+    return data as { id: string; mobile: string; mpin_hash: string } | null;
+  },
+
+  async getPhotoById(id: string) {
+    const { data } = await db().from("members").select("photo_base64").eq("id", id).maybeSingle();
+    return (data as { photo_base64: string | null } | null)?.photo_base64 ?? null;
   },
 
   async findByMembershipId(membershipId: string) {
@@ -59,7 +110,7 @@ export const memberRepository = {
     return data as { referral_code: string; membership_id: string; full_name: string } | null;
   },
 
-  async verifyMpin(member: MemberRow, mpin: string) {
+  async verifyMpin(member: { mpin_hash: string }, mpin: string) {
     return verifySecret(mpin, member.mpin_hash);
   },
 
@@ -155,7 +206,7 @@ export const memberRepository = {
     limit?: number;
     offset?: number;
   }) {
-    let query = db().from("members").select("*", { count: "exact" }).order("created_at", { ascending: false });
+    let query = db().from("members").select(LIST_COLUMNS, { count: "exact" }).order("created_at", { ascending: false });
 
     query = applySearch(query, params.q);
     if (params.loksabhaId) query = query.eq("loksabha_id", params.loksabhaId);
@@ -175,18 +226,18 @@ export const memberRepository = {
     query = query.range(params.offset ?? 0, (params.offset ?? 0) + (params.limit ?? 50) - 1);
 
     const { data, count } = await query;
-    return { rows: (data ?? []) as MemberRow[], total: count ?? 0 };
+    return { rows: (data ?? []) as unknown as MemberRow[], total: count ?? 0 };
   },
 
-  async pendingVerification(limit = 50) {
-    const { data } = await db()
+  async pendingVerification(limit = 50, offset = 0) {
+    const { data, count } = await db()
       .from("members")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("verification_status", "Pending")
       .is("deleted_at", null)
       .order("created_at", { ascending: true })
-      .limit(limit);
-    return (data ?? []) as MemberRow[];
+      .range(offset, offset + limit - 1);
+    return { rows: (data ?? []) as MemberRow[], total: count ?? 0 };
   },
 
   // ---- Public verification (limited fields only) ----
@@ -252,18 +303,11 @@ export const memberRepository = {
     };
   },
 
-  async analyticsRows(limit = 5000) {
-    const { data } = await db()
-      .from("members")
-      .select("created_at, gender, category, jaati, district_name_hi, assembly_name_hi, mandal_name_hi, dob")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: true })
-      .limit(limit);
-    return (data ?? []) as {
-      created_at: string; gender: string; category: string; jaati: string;
-      district_name_hi: string; assembly_name_hi: string; mandal_name_hi: string; dob: string;
-    }[];
-  },
+  // (Removed: analyticsRows() — an older client-side-aggregation approach
+  // that fetched up to 5,000 raw rows just to bucket them in JS. Fully
+  // superseded by the SQL-aggregated functions below, which scale to any
+  // table size and were already the only ones actually called by the
+  // Analytics page. Dead code removed as part of the query audit.)
 
   // ---- Phase 2: scalable SQL-aggregated analytics (Postgres GROUP BY,
   //      not client-side row aggregation — works the same whether the
@@ -299,10 +343,10 @@ export const memberRepository = {
   // ---- Export ----
 
   async forExport(filters: ExportFilters, limit = 20000) {
-    let query = db().from("members").select("*").order("created_at", { ascending: false }).limit(limit);
+    let query = db().from("members").select(LIST_COLUMNS).order("created_at", { ascending: false }).limit(limit);
     query = applyExportFilters(query, filters);
     const { data } = await query;
-    return (data ?? []) as MemberRow[];
+    return (data ?? []) as unknown as MemberRow[];
   },
 
   /** Chunked/paginated fetch used by the background export job processor
@@ -310,12 +354,12 @@ export const memberRepository = {
   async forExportPage(filters: ExportFilters, offset: number, pageSize: number) {
     let query = db()
       .from("members")
-      .select("*")
+      .select(LIST_COLUMNS)
       .order("created_at", { ascending: false })
       .range(offset, offset + pageSize - 1);
     query = applyExportFilters(query, filters);
     const { data } = await query;
-    return (data ?? []) as MemberRow[];
+    return (data ?? []) as unknown as MemberRow[];
   },
 
   async countForExport(filters: ExportFilters) {

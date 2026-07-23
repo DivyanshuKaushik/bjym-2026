@@ -59,6 +59,7 @@ export const viewport: Viewport = {
   maximumScale: 5,
   themeColor: SITE_CONFIG.themeColor,
   viewportFit: "cover",
+  colorScheme: "light",
 };
 
 function JsonLd() {

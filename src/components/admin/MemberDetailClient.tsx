@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  approveMember, rejectMember, suspendMember, activateMember, softDeleteMember, resetMemberMpin,
+  approveMember, rejectMember, suspendMember, activateMember, softDeleteMember, resetMemberMpin, getMemberPhotoForAdmin,
 } from "@/app/actions/admin";
 import { formatDate } from "@/lib/utils";
 import type { MemberRow } from "@/lib/repositories/member.repository";
@@ -25,6 +25,17 @@ export function MemberDetailClient({ member, referrals }: { member: MemberRow; r
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  // Photo is deliberately NOT part of the initial page load (see
+  // memberRepository.findByIdIncludingDeleted) — fetched on demand here so
+  // the rest of the detail page renders immediately without waiting on it.
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(true);
+  useEffect(() => {
+    setPhoto(null);
+    setPhotoLoading(true);
+    getMemberPhotoForAdmin(member.id).then((p) => { setPhoto(p); setPhotoLoading(false); });
+  }, [member.id]);
+
   const run = (fn: () => Promise<{ error?: string | null }>, onOk?: () => void) => {
     setError(null); setMsg(null);
     startTransition(async () => {
@@ -40,7 +51,11 @@ export function MemberDetailClient({ member, referrals }: { member: MemberRow; r
   return (
     <div className="mx-auto max-w-[900px]">
       <div className="mb-5 flex items-center gap-4">
-        <Avatar name={member.full_name} photo={member.photo_base64} size={64} />
+        {photoLoading ? (
+          <div className="h-16 w-16 animate-pulse rounded-full bg-bg" />
+        ) : (
+          <Avatar name={member.full_name} photo={photo} size={64} />
+        )}
         <div>
           <div className="text-xl font-black text-heading">{member.full_name}</div>
           <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-navy">

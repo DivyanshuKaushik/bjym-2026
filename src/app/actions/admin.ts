@@ -107,3 +107,13 @@ export async function updateSettings(input: unknown) {
   revalidatePath("/dashboard");
   return { success: true };
 }
+
+/** On-demand photo fetch for the admin Member Detail page — that page's
+ *  own load (memberRepository.findByIdIncludingDeleted) deliberately
+ *  excludes photo_base64, so this is called client-side afterward to
+ *  fill it in without holding up the initial render. Gated by the same
+ *  permission that gates viewing a member at all. */
+export async function getMemberPhotoForAdmin(memberId: string) {
+  await requirePermission(PERMISSIONS.MEMBERS_VIEW);
+  return memberRepository.getPhotoById(memberId);
+}

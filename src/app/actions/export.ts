@@ -168,5 +168,5 @@ export async function getExportSummary(filters: ExportFilters) {
 
 export async function getExportHistory() {
   await requireExportPermission();
-  return exportRepository.history(30);
+  return exportRepository.history(10);
 }

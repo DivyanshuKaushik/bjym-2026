@@ -117,8 +117,8 @@ function InfoRow({
  */
 export const MembershipCard = React.forwardRef<
     HTMLDivElement,
-    { data: IDCardData; scale?: number }
->(({ data, scale = 1 }, ref) => {
+    { data: IDCardData }
+>(({ data }, ref) => {
     const W = 400;
     const H = 630;
 
@@ -126,10 +126,8 @@ export const MembershipCard = React.forwardRef<
         <div
             ref={ref}
             style={{
-                width: W * scale,
-                height: H * scale,
-                transform: scale !== 1 ? `scale(${scale})` : undefined,
-                transformOrigin: "top left",
+                width: W,
+                height: H,
                 position: "relative",
                 overflow: "hidden",
                 borderRadius: 22,
@@ -205,7 +203,9 @@ export const MembershipCard = React.forwardRef<
                 </div>
             </div>
 
-            {/* photo — bordered, matching the sample */}
+            {/* photo — bordered, matching the sample. overflow:hidden here
+                is what guarantees the photo can never visually exceed the
+                border, regardless of the source image's own aspect ratio. */}
             <div style={{ textAlign: "center", marginTop: 14 }}>
                 <div
                     style={{
@@ -217,6 +217,7 @@ export const MembershipCard = React.forwardRef<
                         padding: 3,
                         background: "#fff",
                         boxShadow: "0 4px 14px rgba(31,41,55,.12)",
+                        overflow: "hidden",
                     }}
                 >
                     {data.photoBase64 ? (
@@ -329,6 +330,7 @@ export const MembershipCard = React.forwardRef<
                         borderRadius: 10,
                         border: `3px solid ${C.saffron}`,
                         boxShadow: "0 3px 10px rgba(31,41,55,.15)",
+                        overflow: "hidden",
                     }}
                 >
                     <QRCodeImg

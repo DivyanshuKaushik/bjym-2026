@@ -37,7 +37,7 @@ export const exportRepository = {
     });
   },
 
-  async history(limit = 30) {
+  async history(limit = 10) {
     const { data } = await db()
       .from("export_history")
       .select("*")
