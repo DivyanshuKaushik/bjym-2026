@@ -157,7 +157,7 @@ export function RegisterWizard() {
                 </Select>
               </div>
               <Err k="dobDay" /><Err k="dobMonth" /><Err k="dobYear" />
-              <div className="mt-1 text-[11px] text-muted">{d.register.ageHint}</div>
+              
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
