@@ -20,7 +20,7 @@ export default function TermsPage() {
       <div className="mb-10 text-center">
         <div className="inline-block rounded-full bg-primary-light px-4 py-1.5 text-[11px] font-black uppercase tracking-widest text-primary-dark">Terms &amp; Conditions</div>
         <h1 className="mt-3 font-serif text-2xl font-black text-heading sm:text-3xl">नियम एवं शर्तें</h1>
-        <p className="mt-2 text-sm text-muted">भारतीय जनता युवा मोर्चा, छत्तीसगढ़ · Digital Membership Portal</p>
+        <p className="mt-2 text-sm text-muted">भारतीय जनता युवा मोर्चा, छत्तीसगढ़</p>
       </div>
 
       <Section title="1. स्वीकृति (Acceptance of Terms)">

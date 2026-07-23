@@ -33,7 +33,7 @@ export function HomeClient() {
 
                 <div className="mx-auto max-w-[760px] px-4 py-8 text-center sm:px-8 sm:py-12">
                     <h1 className="font-serif text-[20px] font-black leading-tight text-heading sm:text-[32px]">
-                      युवा शक्ति, राष्ट्र की शक्ति:{" "}
+                        युवा शक्ति, राष्ट्र की शक्ति:{" "}
                         <span className="text-primary-dark">
                             भारतीय जनता युवा मोर्चा
                         </span>{" "}

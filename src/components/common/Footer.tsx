@@ -49,7 +49,7 @@ export function Footer() {
                                 </div>
                             </div>
                         </div>
-                        <p className="mt-3 text-[12.5px] leading-relaxed text-muted">
+                        <p className="mt-3 text-[12.5px] leading-relaxed text-muted font-semibold">
                             युवा शक्ति, राष्ट्र की शक्ति:{" "}
                             <span className="text-primary-dark">
                                 भारतीय जनता युवा मोर्चा
