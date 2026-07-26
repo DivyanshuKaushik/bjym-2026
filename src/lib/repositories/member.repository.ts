@@ -8,6 +8,19 @@ export type MemberInsert = Database["public"]["Tables"]["members"]["Insert"];
 
 const MEMBER_COLUMNS = "*";
 
+/** Date-range filters come from a plain `<input type="date">` as
+ *  "YYYY-MM-DD" — Postgres reads that as midnight (00:00:00) of that
+ *  day. Using `lte(created_at, dateTo)` therefore silently excluded
+ *  every row created ON `dateTo` itself (anything after its midnight).
+ *  This computes the exclusive upper bound — midnight of the *next*
+ *  day — so the filter is used with `lt`, making `dateTo` correctly
+ *  inclusive of the whole day the admin picked. */
+function endOfDayExclusive(dateOnly: string): string {
+  const d = new Date(dateOnly + "T00:00:00.000Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString();
+}
+
 /** Used for list/table views (Members list, KPI counts, analytics, exports'
  *  preview) — everything EXCEPT `photo_base64` (can be tens of KB per row;
  *  utterly unnecessary for a 28px list avatar and was the direct cause of
@@ -29,7 +42,7 @@ const LIST_COLUMNS = [
   "booth", "address", "pincode",
   "token_version", "referral_code", "referred_by_code", "referral_count",
   "qr_generated", "id_card_generated", "last_login",
-  "registration_source", "language_preference", "rejection_reason",
+  "registration_source", "language_preference", "rejection_reason", "was_previous_member",
   "created_at", "updated_at", "deleted_at",
   "created_by", "updated_by", "verified_by", "verified_at",
   "suspended_by", "suspended_at", "rejected_by", "rejected_at", "deleted_by",
@@ -223,7 +236,7 @@ export const memberRepository = {
     if (params.hasReferral === true) query = query.gt("referral_count", 0);
     if (params.hasReferral === false) query = query.eq("referral_count", 0);
     if (params.dateFrom) query = query.gte("created_at", params.dateFrom);
-    if (params.dateTo) query = query.lte("created_at", params.dateTo);
+    if (params.dateTo) query = query.lt("created_at", endOfDayExclusive(params.dateTo));
 
     query = query.range(params.offset ?? 0, (params.offset ?? 0) + (params.limit ?? 50) - 1);
 
@@ -399,7 +412,7 @@ function applyExportFilters(query: any, filters: ExportFilters) {
   if (filters.mandalId) query = query.eq("mandal_id", filters.mandalId);
   if (filters.hasReferral) query = query.gt("referral_count", 0);
   if (filters.dateFrom) query = query.gte("created_at", filters.dateFrom);
-  if (filters.dateTo) query = query.lte("created_at", filters.dateTo);
+  if (filters.dateTo) query = query.lt("created_at", endOfDayExclusive(filters.dateTo));
   query = applySearch(query, filters.q);
   return query;
 }

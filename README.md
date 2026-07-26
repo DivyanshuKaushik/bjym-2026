@@ -817,4 +817,37 @@ Also added the **Rejected** KPI card to the admin Overview page — the
 `admin_dashboard_kpis()` SQL function (§17 above) already computed it,
 it just hadn't been wired into the grid of `<KPI>` cards.
 
+## 18. Phase 8 — export redesigned for Amplify, date-filter fix, new registration question
+
+- **Export no longer depends on `after()`.** AWS's own Next.js SSR
+  troubleshooting docs confirm `unstable_after` isn't supported on
+  Amplify Hosting — the previous background-export design (queue a job,
+  process it via `after()` after the response was sent, poll for
+  completion) would have silently never finished there. Replaced with a
+  much simpler design: **every** export — 50 rows or 50,000 — downloads
+  as one or more plain synchronous files of up to **3,000 rows each**
+  (`fetchExportBatch` in `src/app/actions/export.ts`). The client
+  requests batch 0, downloads it, requests batch 1, downloads it, and so
+  on — no background job, no polling, no `export_jobs` table dependency.
+  This also keeps every response comfortably under Amplify's ~5.72 MB
+  max SSR response size. The now-unused background-job methods were
+  removed from `export.repository.ts`; the `export_jobs` table itself is
+  left alone in the schema (harmless if unused).
+- **Date-range filter bug, fixed.** `dateTo` came from a plain
+  `<input type="date">` ("YYYY-MM-DD"), which Postgres reads as
+  *midnight* of that day. Filtering with `lte(created_at, dateTo)`
+  therefore silently excluded every row created on `dateTo` itself —
+  picking "date to: today" would show *zero* of today's registrations.
+  Fixed with `endOfDayExclusive()` (`member.repository.ts`), which
+  computes midnight of the *next* day and filters with `lt` instead —
+  `dateTo` is now correctly inclusive of the whole day picked. Applied
+  to both the Members list filter and the Export filters.
+- **New registration question**, added right after the declaration
+  checkbox in the Security step: "क्या आप पूर्व में भाजयुमो के सदस्य
+  अथवा किसी सांगठनिक दायित्व पर रहे हैं?" (हाँ / नहीं), required.
+  Stored as `members.was_previous_member` (nullable boolean — migration
+  `000021_previous_membership.sql`; `NULL` for members who registered
+  before this question existed, not assumed to be "No"). Shown on the
+  admin Member Detail page and available as an export column.
+
 Built by Techxos · techxos.in

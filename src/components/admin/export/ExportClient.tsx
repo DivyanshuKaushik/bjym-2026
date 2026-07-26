@@ -1,19 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import jsPDF from "jspdf";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
 import { CATEGORIES, getAssemblies, getMandals, type District } from "@/data/hierarchy";
 import { LOKSABHA_CONSTITUENCIES } from "@/data/loksabha";
-import {
-  previewExportCount, fetchExportDataSync, startBackgroundExport,
-  getExportJobStatus, downloadExportJobFile, getExportSummary, listMyExportJobs,
-} from "@/app/actions/export";
+import { previewExportCount, fetchExportBatch, getExportSummary } from "@/app/actions/export";
 import type { ExportFilters } from "@/lib/repositories/member.repository";
 import { EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMNS } from "@/lib/export/columns";
 import { formatDate } from "@/lib/utils";
@@ -21,7 +17,6 @@ import { formatDate } from "@/lib/utils";
 const STORAGE_KEY = "bjym_export_columns";
 
 type HistoryRow = { id: string; format: string; recordCount: number; status: string; createdAt: string; adminName: string };
-type JobRow = { id: string; format: string; status: string; total_rows: number; processed_rows: number; file_name: string | null; created_at: string; completed_at: string | null };
 
 function downloadBase64(base64: string, fileName: string, mime: string) {
   const a = document.createElement("a");
@@ -29,6 +24,8 @@ function downloadBase64(base64: string, fileName: string, mime: string) {
   a.download = fileName;
   a.click();
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function ExportClient({ history, districts }: { history: HistoryRow[]; districts: District[] }) {
   const [filters, setFilters] = useState<ExportFilters>({});
@@ -38,44 +35,21 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeJob, setActiveJob] = useState<{ id: string; status: string; total: number; processed: number } | null>(null);
-  const [jobs, setJobs] = useState<JobRow[]>([]);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) { try { setColumns(JSON.parse(saved)); } catch { /* ignore */ } }
-    refreshJobs();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(columns)); }, [columns]);
-
-  const refreshJobs = async () => setJobs((await listMyExportJobs()) as JobRow[]);
 
   const setFilter = <K extends keyof ExportFilters>(k: K, v: ExportFilters[K]) => setFilters((p) => ({ ...p, [k]: v || undefined }));
   const toggleColumn = (key: string) => setColumns((prev) => (prev.includes(key) ? prev.filter((c) => c !== key) : [...prev, key]));
 
   const runPreview = async () => setPreview(await previewExportCount(filters));
 
-  const pollJob = (jobId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      const status = await getExportJobStatus(jobId);
-      if (!status) return;
-      setActiveJob({ id: status.id, status: status.status, total: status.totalRows, processed: status.processedRows });
-      if (status.status === "completed" || status.status === "failed") {
-        if (pollRef.current) clearInterval(pollRef.current);
-        setBusy(false);
-        refreshJobs();
-        if (status.status === "failed") setError(status.errorMessage || "Export विफल हुआ");
-        else setDone(`Export तैयार है — नीचे Job History से Download करें ✓`);
-      }
-    }, 1500);
-  };
-
   const runExport = async () => {
-    setBusy(true); setDone(null); setError(null); setActiveJob(null);
+    setBusy(true); setDone(null); setError(null); setBatchProgress(null);
     try {
       if (format === "pdf") {
         const summary = await getExportSummary(filters);
@@ -101,33 +75,35 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
       }
 
       const check = await previewExportCount(filters);
-      if (check.willQueue) {
-        const { jobId } = await startBackgroundExport(filters, format, columns);
-        setActiveJob({ id: jobId, status: "queued", total: check.count, processed: 0 });
-        pollJob(jobId);
-        setDone(null);
-      } else {
-        const res = await fetchExportDataSync(filters, format, columns);
-        const mime = format === "csv" ? "text/csv;charset=utf-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-        downloadBase64(res.base64, `bjym-members-export.${format}`, mime);
-        setDone(`${res.rowCount} records exported ✓`);
-        setBusy(false);
-        refreshJobs();
+      const mime = format === "csv" ? "text/csv;charset=utf-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      let totalRows = 0;
+
+      // Every export — small or large — downloads as one or more files of
+      // up to 3,000 rows each, one plain request per batch. No background
+      // job, no polling: this is what makes exports work the same way
+      // whether this app is deployed on Vercel or on AWS Amplify (whose
+      // Hosting compute doesn't support the `after()` API a background-job
+      // design would need).
+      for (let i = 0; i < check.totalBatches; i++) {
+        setBatchProgress({ current: i + 1, total: check.totalBatches });
+        const res = await fetchExportBatch(filters, format, columns, i);
+        downloadBase64(res.base64, res.fileName, mime);
+        totalRows += res.rowCount;
+        if (i < check.totalBatches - 1) await sleep(400); // let each download start before triggering the next
       }
+
+      setDone(
+        check.totalBatches > 1
+          ? `${totalRows.toLocaleString("en-IN")} records — ${check.totalBatches} files डाउनलोड हो गईं ✓`
+          : `${totalRows.toLocaleString("en-IN")} records exported ✓`
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export में त्रुटि हुई");
+    } finally {
       setBusy(false);
+      setBatchProgress(null);
     }
   };
-
-  const downloadJob = async (jobId: string, fileName: string | null, jobFormat: string) => {
-    const res = await downloadExportJobFile(jobId);
-    if (!res) return;
-    const mime = jobFormat === "csv" ? "text/csv;charset=utf-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    downloadBase64(res.base64, fileName || res.fileName, mime);
-  };
-
-  const jobStatusTone = (s: string) => (s === "completed" ? "success" : s === "failed" ? "danger" : "warning");
 
   return (
     <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
@@ -182,6 +158,7 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
             <Input type="date" value={filters.dateFrom ?? ""} onChange={(e) => setFilter("dateFrom", e.target.value)} />
             <Input type="date" value={filters.dateTo ?? ""} onChange={(e) => setFilter("dateTo", e.target.value)} />
           </div>
+          <p className="-mt-1.5 text-[10.5px] text-muted">दोनों तारीखें inclusive हैं (उन दिनों का पूरा data शामिल होगा)।</p>
           <Input placeholder="Search (ID/name/phone/email/referral code)" value={filters.q ?? ""} onChange={(e) => setFilter("q", e.target.value)} />
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => { setFilters({}); setPreview(null); }}>Reset Filters</Button>
@@ -190,9 +167,9 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
           {preview && (
             <div className="rounded-xl bg-bg p-3 text-center text-xs font-bold text-heading">
               {preview.count.toLocaleString("en-IN")} records match
-              {preview.willQueue && (
+              {preview.totalBatches > 1 && (
                 <div className="mt-1 text-[10.5px] font-normal text-primary-dark">
-                  {preview.count.toLocaleString("en-IN")} &gt; {preview.syncThreshold.toLocaleString("en-IN")} — यह background में queue होगा (progress bar दिखेगा)।
+                  {preview.batchSize.toLocaleString("en-IN")}-row batches में <b>{preview.totalBatches}</b> अलग files डाउनलोड होंगी।
                 </div>
               )}
               {preview.capped && <div className="mt-1 text-[10.5px] font-normal text-danger">Hard cap: {preview.hardCap.toLocaleString("en-IN")} rows — इससे ज़्यादा filters और narrow करें।</div>}
@@ -227,8 +204,8 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
           <CardContent className="grid gap-3">
             <div className="flex flex-wrap items-center gap-3">
               <Select value={format} onChange={(e) => setFormat(e.target.value as typeof format)} className="w-auto">
-                <option value="csv">CSV (complete records)</option>
-                <option value="xlsx">Excel .xlsx (complete records)</option>
+                <option value="csv">CSV (complete records, batches of 3,000)</option>
+                <option value="xlsx">Excel .xlsx (complete records, batches of 3,000)</option>
                 <option value="pdf">PDF (filtered summary only)</option>
               </Select>
               <Button onClick={runExport} disabled={busy || (format !== "pdf" && columns.length === 0)}>{busy ? "Processing…" : "⬇ Export"}</Button>
@@ -236,53 +213,18 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
               {done && <span className="text-xs font-bold text-secondary-dark">{done}</span>}
             </div>
 
-            {activeJob && activeJob.status !== "completed" && activeJob.status !== "failed" && (
+            {batchProgress && batchProgress.total > 1 && (
               <div>
                 <div className="mb-1 flex justify-between text-[11px] font-bold text-muted">
-                  <span>{activeJob.status === "queued" ? "Queued…" : "Processing…"}</span>
-                  <span>{activeJob.processed.toLocaleString("en-IN")} / {activeJob.total.toLocaleString("en-IN")}</span>
+                  <span>Batch {batchProgress.current} / {batchProgress.total} डाउनलोड हो रही है…</span>
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full bg-bg">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all"
-                    style={{ width: `${activeJob.total > 0 ? Math.min(100, (activeJob.processed / activeJob.total) * 100) : 5}%` }}
+                    style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
                   />
                 </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle>Background Job History</CardTitle></CardHeader>
-          <CardContent className="overflow-x-auto">
-            {jobs.length === 0 ? (
-              <div className="text-sm text-muted">अभी तक कोई background export नहीं हुआ।</div>
-            ) : (
-              <table className="w-full min-w-[560px] border-collapse text-[12px]">
-                <thead>
-                  <tr className="bg-bg text-left">
-                    {["Date", "Format", "Status", "Rows", "Download"].map((h) => (
-                      <th key={h} className="border-b border-border p-2 text-[10px] font-extrabold uppercase tracking-wide text-muted">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobs.map((j) => (
-                    <tr key={j.id} className="border-b border-border">
-                      <td className="p-2 text-muted">{formatDate(j.created_at)}</td>
-                      <td className="p-2 uppercase">{j.format}</td>
-                      <td className="p-2"><Badge tone={jobStatusTone(j.status)}>{j.status}</Badge></td>
-                      <td className="p-2">{j.processed_rows.toLocaleString("en-IN")} / {j.total_rows.toLocaleString("en-IN")}</td>
-                      <td className="p-2">
-                        {j.status === "completed" ? (
-                          <button className="text-xs font-bold text-primary-dark hover:underline" onClick={() => downloadJob(j.id, j.file_name, j.format)}>⬇ Download</button>
-                        ) : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             )}
           </CardContent>
         </Card>

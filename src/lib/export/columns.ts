@@ -26,6 +26,7 @@ export const EXPORT_COLUMNS: ExportColumn[] = [
   { key: "address", label: "Full Address", get: (m) => m.address },
   { key: "pincode", label: "Pincode", get: (m) => m.pincode },
   { key: "referral_code", label: "Referral Code", get: (m) => m.referral_code },
+  { key: "was_previous_member", label: "Previously BJYM Member/Office", get: (m) => (m.was_previous_member === null ? "" : m.was_previous_member ? "Yes" : "No") },
   { key: "referred_by_code", label: "Referred By", get: (m) => m.referred_by_code ?? "" },
   { key: "referral_count", label: "Total Referrals", get: (m) => m.referral_count },
   { key: "qr_generated", label: "QR Generated", get: (m) => (m.qr_generated ? "Yes" : "No") },

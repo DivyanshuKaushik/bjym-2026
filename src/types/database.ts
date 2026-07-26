@@ -100,6 +100,7 @@ export interface Database {
           language_preference: string;
           token_version: number;
           rejection_reason: string | null;
+          was_previous_member: boolean | null;
           created_at: string;
           updated_at: string;
           deleted_at: string | null;

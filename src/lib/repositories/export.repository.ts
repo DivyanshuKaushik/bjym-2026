@@ -1,23 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db/client";
 
-export type ExportJobRow = {
-  id: string;
-  admin_id: string;
-  format: "csv" | "xlsx" | "pdf";
-  filters: Record<string, unknown>;
-  columns: string[];
-  status: "queued" | "processing" | "completed" | "failed";
-  total_rows: number;
-  processed_rows: number;
-  file_base64: string | null;
-  file_name: string | null;
-  error_message: string | null;
-  created_at: string;
-  started_at: string | null;
-  completed_at: string | null;
-};
-
 export const exportRepository = {
   async record(entry: {
     adminId: string;
@@ -64,50 +47,13 @@ export const exportRepository = {
       filters: r.filters,
     }));
   },
-
-  // ---- Phase 2: background export jobs ----
-
-  async createJob(entry: { adminId: string; format: "csv" | "xlsx" | "pdf"; filters: Record<string, unknown>; columns: string[] }) {
-    const { data, error } = await db()
-      .from("export_jobs")
-      .insert({ admin_id: entry.adminId, format: entry.format, filters: entry.filters, columns: entry.columns, status: "queued" })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    return (data as { id: string }).id;
-  },
-
-  async markProcessing(jobId: string, totalRows: number) {
-    await db().from("export_jobs").update({ status: "processing", total_rows: totalRows, started_at: new Date().toISOString() }).eq("id", jobId);
-  },
-
-  async updateProgress(jobId: string, processedRows: number) {
-    await db().from("export_jobs").update({ processed_rows: processedRows }).eq("id", jobId);
-  },
-
-  async completeJob(jobId: string, fileBase64: string, fileName: string) {
-    await db()
-      .from("export_jobs")
-      .update({ status: "completed", file_base64: fileBase64, file_name: fileName, completed_at: new Date().toISOString() })
-      .eq("id", jobId);
-  },
-
-  async failJob(jobId: string, message: string) {
-    await db().from("export_jobs").update({ status: "failed", error_message: message, completed_at: new Date().toISOString() }).eq("id", jobId);
-  },
-
-  async getJob(jobId: string, adminId: string) {
-    const { data } = await db().from("export_jobs").select("*").eq("id", jobId).eq("admin_id", adminId).maybeSingle();
-    return data as ExportJobRow | null;
-  },
-
-  async listJobsForAdmin(adminId: string, limit = 10) {
-    const { data } = await db()
-      .from("export_jobs")
-      .select("id, format, status, total_rows, processed_rows, file_name, created_at, completed_at")
-      .eq("admin_id", adminId)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    return (data ?? []) as Pick<ExportJobRow, "id" | "format" | "status" | "total_rows" | "processed_rows" | "file_name" | "created_at" | "completed_at">[];
-  },
 };
+
+// (Removed: the export_jobs-backed background job methods —
+// createJob/markProcessing/updateProgress/completeJob/failJob/getJob/
+// listJobsForAdmin. That design relied on Next.js's `after()` API to
+// keep processing after the response was sent, which isn't supported
+// on AWS Amplify Hosting. Exports now always download in synchronous
+// batches of up to 3,000 rows instead — see src/app/actions/export.ts.
+// The `export_jobs` table itself is left in place in the DB schema;
+// it's simply unused now, which is harmless.)

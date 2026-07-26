@@ -1,8 +1,8 @@
 -- =====================================================================
 -- RESET + MIGRATE IN ONE FILE
 -- Paste this whole file into Supabase SQL Editor for a guaranteed clean
--- setup in a single run: drops any existing app tables/functions/storage
--- first, then applies all 20 migrations in order.
+-- setup in a single run: drops any existing app tables/functions first,
+-- then applies every migration in order.
 -- =====================================================================
 
 -- =====================================================================
@@ -93,7 +93,7 @@ select 'Reset complete — public schema is now clean. Run the migrations next.'
 
 -- ============ MIGRATIONS START HERE ============
 -- =====================================================================
--- COMBINED MIGRATION FILE — runs all 000001..000020 migrations in order.
+-- COMBINED MIGRATION FILE — runs all migrations in order.
 -- Paste this ONE file into Supabase SQL Editor instead of running each
 -- file one by one. Safe to re-run (every statement is idempotent).
 --
@@ -1316,4 +1316,26 @@ drop policy if exists "member-photos no anon deletes" on storage.objects;
 create policy "member-photos no anon deletes"
   on storage.objects for delete
   using (bucket_id = 'member-photos' and auth.role() = 'service_role');
+
+
+-- ============ FROM: 000021_previous_membership.sql ============
+-- =====================================================================
+-- 000021_previous_membership.sql
+--
+-- New registration question: "क्या आप पूर्व में भाजयुमो के सदस्य अथवा
+-- किसी सांगठनिक दायित्व पर रहे हैं?" (Have you previously been a BJYM
+-- member or held any organizational responsibility?) — Yes/No, asked
+-- right after the declaration checkbox in the Security step.
+--
+-- Nullable so existing members (registered before this question existed)
+-- simply have NULL — not "No" — since we genuinely don't know their
+-- answer, and NULL correctly reflects that rather than assuming either
+-- way.
+-- =====================================================================
+
+alter table public.members
+  add column if not exists was_previous_member boolean;
+
+comment on column public.members.was_previous_member is
+  'Self-declared at registration: previously a BJYM member or held an organizational responsibility. NULL = registered before this question existed / not answered.';
 

@@ -26,6 +26,7 @@ const EMPTY = {
   loksabhaId: "",
   address: "", pincode: "",
   mpin: "", confirmMpin: "", referredByCode: "", agree: false as boolean,
+  wasPreviousMember: "" as "" | "yes" | "no",
 };
 
 const YEARS = getEligibleYearsSorted();
@@ -314,6 +315,30 @@ export function RegisterWizard() {
                 <span>{d.register.declaration}</span>
               </label>
               <Err k="agree" />
+            </div>
+            <div>
+              <Label required>क्या आप पूर्व में भाजयुमो के सदस्य अथवा किसी सांगठनिक दायित्व पर रहे हैं?</Label>
+              <div className="mt-1.5 flex gap-5">
+                <label className="flex items-center gap-1.5 text-sm font-bold text-heading">
+                  <input
+                    type="radio"
+                    name="wasPreviousMember"
+                    checked={f.wasPreviousMember === "yes"}
+                    onChange={() => set("wasPreviousMember", "yes")}
+                  />
+                  हाँ
+                </label>
+                <label className="flex items-center gap-1.5 text-sm font-bold text-heading">
+                  <input
+                    type="radio"
+                    name="wasPreviousMember"
+                    checked={f.wasPreviousMember === "no"}
+                    onChange={() => set("wasPreviousMember", "no")}
+                  />
+                  नहीं
+                </label>
+              </div>
+              <Err k="wasPreviousMember" />
             </div>
             <div className="flex justify-between">
               <Button variant="ghost" onClick={back}>← {d.register.back}</Button>

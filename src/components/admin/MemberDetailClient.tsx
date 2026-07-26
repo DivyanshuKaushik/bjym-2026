@@ -95,6 +95,10 @@ export function MemberDetailClient({ member, referrals }: { member: MemberRow; r
             <Row label="पंजीकरण तिथि" value={formatDate(member.created_at)} />
             <Row label="Referral Code" value={member.referral_code} />
             <Row label="Referral Count" value={String(member.referral_count)} />
+            <Row
+              label="पूर्व सदस्य/दायित्व"
+              value={member.was_previous_member === null ? "—" : member.was_previous_member ? "हाँ" : "नहीं"}
+            />
           </CardContent>
         </Card>
 

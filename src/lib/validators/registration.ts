@@ -49,6 +49,7 @@ const mpinObjectSchema = z.object({
   confirmMpin: z.string(),
   referredByCode: z.string().trim().optional().or(z.literal("")),
   agree: z.literal(true, { errorMap: () => ({ message: "घोषणा स्वीकार करना अनिवार्य है" }) }),
+  wasPreviousMember: z.enum(["yes", "no"], { errorMap: () => ({ message: "कृपया एक विकल्प चुनें" }) }),
 });
 
 export const securitySchema = mpinObjectSchema.refine((d) => d.mpin === d.confirmMpin, {

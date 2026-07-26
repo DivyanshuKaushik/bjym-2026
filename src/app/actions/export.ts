@@ -1,6 +1,5 @@
 "use server";
 
-import { after } from "next/server";
 import * as XLSX from "xlsx";
 import { auth } from "@/lib/auth";
 import { memberRepository, type ExportFilters, type MemberRow } from "@/lib/repositories/member.repository";
@@ -9,12 +8,21 @@ import { PERMISSIONS } from "@/lib/rbac/permissions";
 import { EXPORT_COLUMNS } from "@/lib/export/columns";
 import { CATEGORIES } from "@/data/hierarchy";
 
-/** Exports at or below this row count happen synchronously (instant
- *  download). Above it, we queue a background job — this is the
- *  "queue exports exceeding a configurable limit" requirement. */
-const EXPORT_SYNC_THRESHOLD = 3000;
+/**
+ * Every export — regardless of total size — is fetched and downloaded in
+ * fixed-size batches of this many rows, one synchronous request per
+ * batch. This deliberately replaces an earlier design that queued large
+ * exports as a background job processed via Next.js's `after()` API:
+ * that API isn't supported when this app is deployed on AWS Amplify
+ * Hosting (confirmed against AWS's own Next.js SSR troubleshooting
+ * docs), so a "background" export would have silently never finished
+ * there. Batches of 3,000 rows keep each response comfortably under
+ * Amplify's ~5.72 MB max SSR response size even at the widest column
+ * selection, with no background job/polling infrastructure needed at
+ * all — every batch is just an ordinary request/response.
+ */
+const BATCH_SIZE = 3000;
 const HARD_CAP = 500000; // safety ceiling regardless of filters
-const BATCH_SIZE = 2000;
 
 async function requireExportPermission() {
   const session = await auth();
@@ -27,11 +35,13 @@ async function requireExportPermission() {
 export async function previewExportCount(filters: ExportFilters) {
   await requireExportPermission();
   const count = await memberRepository.countForExport(filters);
+  const capped = count > HARD_CAP;
+  const effectiveCount = Math.min(count, HARD_CAP);
   return {
     count,
-    willQueue: count > EXPORT_SYNC_THRESHOLD,
-    syncThreshold: EXPORT_SYNC_THRESHOLD,
-    capped: count > HARD_CAP,
+    batchSize: BATCH_SIZE,
+    totalBatches: Math.max(1, Math.ceil(effectiveCount / BATCH_SIZE)),
+    capped,
     hardCap: HARD_CAP,
   };
 }
@@ -53,93 +63,44 @@ function buildXlsxBase64(rows: MemberRow[], columns: string[]) {
 }
 
 /**
- * Small/medium exports: fetch + build the file inline and return it to
- * the client immediately (existing fast path, unchanged behaviour for
- * the common case).
+ * Fetches and builds exactly ONE batch (up to BATCH_SIZE rows) as a
+ * complete, ready-to-download file — always a plain synchronous
+ * request/response, however many total rows match the filters. The
+ * client calls this once per batch (batchIndex 0, 1, 2, ...) and
+ * triggers a download for each; see ExportClient.tsx.
  */
-export async function fetchExportDataSync(filters: ExportFilters, format: "csv" | "xlsx", columns: string[]) {
+export async function fetchExportBatch(
+  filters: ExportFilters,
+  format: "csv" | "xlsx",
+  columns: string[],
+  batchIndex: number
+) {
   const adminId = await requireExportPermission();
-  const rows = await memberRepository.forExport(filters, EXPORT_SYNC_THRESHOLD);
+  const total = Math.min(await memberRepository.countForExport(filters), HARD_CAP);
+  const totalBatches = Math.max(1, Math.ceil(total / BATCH_SIZE));
+  const offset = batchIndex * BATCH_SIZE;
 
-  await exportRepository.record({ adminId, format, filters: filters as Record<string, unknown>, columns, recordCount: rows.length });
+  const rows = await memberRepository.forExportPage(filters, offset, BATCH_SIZE);
 
-  if (format === "csv") return { base64: Buffer.from(buildCsv(rows, columns), "utf-8").toString("base64"), rowCount: rows.length };
-  return { base64: buildXlsxBase64(rows, columns), rowCount: rows.length };
-}
+  const suffix = totalBatches > 1 ? `-batch-${batchIndex + 1}-of-${totalBatches}` : "";
+  const fileName = `bjym-members-export${suffix}.${format}`;
+  const base64 = format === "csv" ? Buffer.from(buildCsv(rows, columns), "utf-8").toString("base64") : buildXlsxBase64(rows, columns);
 
-/**
- * Large exports: create a queued job, kick off chunked background
- * processing via `after()` (runs once the response has been sent — no
- * external job queue service required), and return the job id
- * immediately so the client can poll `getExportJobStatus`.
- */
-export async function startBackgroundExport(filters: ExportFilters, format: "csv" | "xlsx", columns: string[]) {
-  const adminId = await requireExportPermission();
-  const total = await memberRepository.countForExport(filters);
-  const cappedTotal = Math.min(total, HARD_CAP);
+  // Log the export once, on the first batch, with the FULL intended row
+  // count — not repeated per batch, and not under-counting a multi-batch
+  // export as if it were only its first 3,000 rows.
+  if (batchIndex === 0) {
+    await exportRepository.record({ adminId, format, filters: filters as Record<string, unknown>, columns, recordCount: total });
+  }
 
-  const jobId = await exportRepository.createJob({ adminId, format, filters: filters as Record<string, unknown>, columns });
-
-  after(async () => {
-    try {
-      await exportRepository.markProcessing(jobId, cappedTotal);
-      const allRows: MemberRow[] = [];
-      let offset = 0;
-      while (offset < cappedTotal) {
-        const page = await memberRepository.forExportPage(filters, offset, BATCH_SIZE);
-        if (page.length === 0) break;
-        allRows.push(...page);
-        offset += page.length;
-        await exportRepository.updateProgress(jobId, Math.min(offset, cappedTotal));
-        if (page.length < BATCH_SIZE) break;
-      }
-
-      const fileName = `bjym-members-export-${jobId.slice(0, 8)}.${format}`;
-      const base64 = format === "csv" ? Buffer.from(buildCsv(allRows, columns), "utf-8").toString("base64") : buildXlsxBase64(allRows, columns);
-
-      await exportRepository.completeJob(jobId, base64, fileName);
-      await exportRepository.record({ adminId, format, filters: filters as Record<string, unknown>, columns, recordCount: allRows.length });
-    } catch (err) {
-      await exportRepository.failJob(jobId, err instanceof Error ? err.message : "Unknown error");
-      await exportRepository.record({ adminId, format, filters: filters as Record<string, unknown>, columns, recordCount: 0, status: "failed" });
-    }
-  });
-
-  return { jobId };
-}
-
-export async function getExportJobStatus(jobId: string) {
-  const adminId = await requireExportPermission();
-  const job = await exportRepository.getJob(jobId, adminId);
-  if (!job) return null;
-  return {
-    id: job.id,
-    status: job.status,
-    totalRows: job.total_rows,
-    processedRows: job.processed_rows,
-    fileName: job.file_name,
-    errorMessage: job.error_message,
-    hasFile: !!job.file_base64,
-  };
-}
-
-export async function downloadExportJobFile(jobId: string) {
-  const adminId = await requireExportPermission();
-  const job = await exportRepository.getJob(jobId, adminId);
-  if (!job || job.status !== "completed" || !job.file_base64) return null;
-  return { base64: job.file_base64, fileName: job.file_name ?? "export" };
-}
-
-export async function listMyExportJobs() {
-  const adminId = await requireExportPermission();
-  return exportRepository.listJobsForAdmin(adminId, 10);
+  return { base64, fileName, rowCount: rows.length, batchIndex, totalBatches };
 }
 
 /**
  * PDF is always a filtered SUMMARY (counts by status/gender/category),
- * never a full row dump — so it never needs to be queued regardless of
- * how many rows match the filters. Uses targeted COUNT queries instead
- * of fetching rows, so it stays fast at any scale.
+ * never a full row dump — so it never needs batching regardless of how
+ * many rows match the filters. Uses targeted COUNT queries instead of
+ * fetching rows, so it stays fast at any scale.
  */
 export async function getExportSummary(filters: ExportFilters) {
   await requireExportPermission();

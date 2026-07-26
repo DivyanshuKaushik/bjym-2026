@@ -89,6 +89,7 @@ export async function registerMember(input: unknown): Promise<RegisterState> {
     mpin_hash: mpinHash,
     referred_by_code: referredByCode,
     registration_source: "web",
+    was_previous_member: data.wasPreviousMember === "yes",
   });
 
   if (error || !member) {
