@@ -339,17 +339,38 @@ export const memberRepository = {
     return (data ?? []) as unknown as MemberRow[];
   },
 
-  /** Chunked/paginated fetch used by the background export job processor
-   *  so a 5,00,000-row export doesn't require one giant query. */
+  /**
+   * Chunked/paginated fetch used by the export job processor so a
+   * 5,00,000-row export doesn't require one giant query.
+   *
+   * Loops internally instead of issuing a single `.range(offset, offset +
+   * pageSize - 1)` call: Supabase/PostgREST enforces a project-level "Max
+   * Rows" cap (default 1,000) that silently truncates a response below
+   * whatever `.range()` asked for. A single-shot call requesting 3,000 rows
+   * would then only get 1,000 back while the caller still advances its
+   * offset by 3,000 — silently skipping 2,000 real rows per page. Re-issuing
+   * the query from the actual returned count until `pageSize` rows are
+   * collected (or the data runs out) is correct regardless of that cap's
+   * configured value.
+   */
   async forExportPage(filters: ExportFilters, offset: number, pageSize: number) {
-    let query = db()
-      .from("members")
-      .select(LIST_COLUMNS)
-      .order("created_at", { ascending: false })
-      .range(offset, offset + pageSize - 1);
-    query = applyExportFilters(query, filters);
-    const { data } = await query;
-    return (data ?? []) as unknown as MemberRow[];
+    const collected: MemberRow[] = [];
+    let cursor = offset;
+    const end = offset + pageSize;
+    while (cursor < end) {
+      let query = db()
+        .from("members")
+        .select(LIST_COLUMNS)
+        .order("created_at", { ascending: false })
+        .range(cursor, end - 1);
+      query = applyExportFilters(query, filters);
+      const { data } = await query;
+      const got = (data ?? []) as unknown as MemberRow[];
+      if (got.length === 0) break;
+      collected.push(...got);
+      cursor += got.length;
+    }
+    return collected;
   },
 
   async countForExport(filters: ExportFilters) {
