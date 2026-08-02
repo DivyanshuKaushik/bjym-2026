@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import jsPDF from "jspdf";
+import * as XLSX from "xlsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -9,8 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CATEGORIES, getAssemblies, getMandals, type District } from "@/data/hierarchy";
 import { LOKSABHA_CONSTITUENCIES } from "@/data/loksabha";
-import { previewExportCount, fetchExportBatch, getExportSummary } from "@/app/actions/export";
-import type { ExportFilters } from "@/lib/repositories/member.repository";
+import { previewExportCount, fetchExportRows, getExportSummary } from "@/app/actions/export";
+import type { ExportFilters, MemberRow } from "@/lib/repositories/member.repository";
 import { EXPORT_COLUMNS, DEFAULT_EXPORT_COLUMNS } from "@/lib/export/columns";
 import { formatDate } from "@/lib/utils";
 
@@ -18,14 +19,35 @@ const STORAGE_KEY = "bjym_export_columns";
 
 type HistoryRow = { id: string; format: string; recordCount: number; status: string; createdAt: string; adminName: string };
 
-function downloadBase64(base64: string, fileName: string, mime: string) {
+// Triggers exactly ONE download. Browsers (Chrome in particular) silently
+// block automatic downloads after the first one fired in a burst, which is
+// why looping per-batch downloads only ever produced one visible file no
+// matter how many batches actually ran server-side.
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = `data:${mime};base64,${base64}`;
+  a.href = url;
   a.download = fileName;
   a.click();
+  URL.revokeObjectURL(url);
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+function buildCsvBlob(rows: MemberRow[], columns: string[]) {
+  const selectedCols = EXPORT_COLUMNS.filter((c) => columns.includes(c.key));
+  const header = selectedCols.map((c) => c.label).join(",");
+  const body = rows.map((r) => selectedCols.map((c) => `"${String(c.get(r)).replace(/"/g, '""')}"`).join(",")).join("\n");
+  return new Blob(["﻿" + header + "\n" + body], { type: "text/csv;charset=utf-8" });
+}
+
+function buildXlsxBlob(rows: MemberRow[], columns: string[]) {
+  const selectedCols = EXPORT_COLUMNS.filter((c) => columns.includes(c.key));
+  const data = rows.map((r) => Object.fromEntries(selectedCols.map((c) => [c.label, c.get(r)])));
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Members");
+  const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  return new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
 
 export function ExportClient({ history, districts }: { history: HistoryRow[]; districts: District[] }) {
   const [filters, setFilters] = useState<ExportFilters>({});
@@ -75,28 +97,26 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
       }
 
       const check = await previewExportCount(filters);
-      const mime = format === "csv" ? "text/csv;charset=utf-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-      let totalRows = 0;
 
-      // Every export — small or large — downloads as one or more files of
-      // up to 3,000 rows each, one plain request per batch. No background
-      // job, no polling: this is what makes exports work the same way
-      // whether this app is deployed on Vercel or on AWS Amplify (whose
+      // Fetches every batch as raw row JSON — no background job, no
+      // polling, so this works the same on Vercel or AWS Amplify (whose
       // Hosting compute doesn't support the `after()` API a background-job
-      // design would need).
+      // design would need) — then builds ONE CSV/XLSX file client-side and
+      // triggers exactly one download. Downloading each batch as its own
+      // file used to trigger multiple auto-downloads in one burst, which
+      // browsers silently block after the first.
+      const allRows: MemberRow[] = [];
       for (let i = 0; i < check.totalBatches; i++) {
         setBatchProgress({ current: i + 1, total: check.totalBatches });
-        const res = await fetchExportBatch(filters, format, columns, i);
-        downloadBase64(res.base64, res.fileName, mime);
-        totalRows += res.rowCount;
-        if (i < check.totalBatches - 1) await sleep(400); // let each download start before triggering the next
+        const res = await fetchExportRows(filters, format, columns, i);
+        allRows.push(...res.rows);
       }
 
-      setDone(
-        check.totalBatches > 1
-          ? `${totalRows.toLocaleString("en-IN")} records — ${check.totalBatches} files डाउनलोड हो गईं ✓`
-          : `${totalRows.toLocaleString("en-IN")} records exported ✓`
-      );
+      const fileName = `bjym-members-export.${format}`;
+      const blob = format === "csv" ? buildCsvBlob(allRows, columns) : buildXlsxBlob(allRows, columns);
+      downloadBlob(blob, fileName);
+
+      setDone(`${allRows.length.toLocaleString("en-IN")} records exported ✓`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export में त्रुटि हुई");
     } finally {
@@ -169,7 +189,7 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
               {preview.count.toLocaleString("en-IN")} records match
               {preview.totalBatches > 1 && (
                 <div className="mt-1 text-[10.5px] font-normal text-primary-dark">
-                  {preview.batchSize.toLocaleString("en-IN")}-row batches में <b>{preview.totalBatches}</b> अलग files डाउनलोड होंगी।
+                  {preview.batchSize.toLocaleString("en-IN")}-row chunks में fetch होकर <b>1</b> file में मिलेंगे।
                 </div>
               )}
               {preview.capped && <div className="mt-1 text-[10.5px] font-normal text-danger">Hard cap: {preview.hardCap.toLocaleString("en-IN")} rows — इससे ज़्यादा filters और narrow करें।</div>}
@@ -204,8 +224,8 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
           <CardContent className="grid gap-3">
             <div className="flex flex-wrap items-center gap-3">
               <Select value={format} onChange={(e) => setFormat(e.target.value as typeof format)} className="w-auto">
-                <option value="csv">CSV (complete records, batches of 3,000)</option>
-                <option value="xlsx">Excel .xlsx (complete records, batches of 3,000)</option>
+                <option value="csv">CSV (complete records, single file)</option>
+                <option value="xlsx">Excel .xlsx (complete records, single file)</option>
                 <option value="pdf">PDF (filtered summary only)</option>
               </Select>
               <Button onClick={runExport} disabled={busy || (format !== "pdf" && columns.length === 0)}>{busy ? "Processing…" : "⬇ Export"}</Button>
@@ -216,7 +236,7 @@ export function ExportClient({ history, districts }: { history: HistoryRow[]; di
             {batchProgress && batchProgress.total > 1 && (
               <div>
                 <div className="mb-1 flex justify-between text-[11px] font-bold text-muted">
-                  <span>Batch {batchProgress.current} / {batchProgress.total} डाउनलोड हो रही है…</span>
+                  <span>Fetching {batchProgress.current} / {batchProgress.total}…</span>
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full bg-bg">
                   <div

@@ -1,25 +1,31 @@
 "use server";
 
-import * as XLSX from "xlsx";
 import { auth } from "@/lib/auth";
-import { memberRepository, type ExportFilters, type MemberRow } from "@/lib/repositories/member.repository";
+import { memberRepository, type ExportFilters } from "@/lib/repositories/member.repository";
 import { exportRepository } from "@/lib/repositories/export.repository";
 import { PERMISSIONS } from "@/lib/rbac/permissions";
-import { EXPORT_COLUMNS } from "@/lib/export/columns";
 import { CATEGORIES } from "@/data/hierarchy";
 
 /**
- * Every export — regardless of total size — is fetched and downloaded in
- * fixed-size batches of this many rows, one synchronous request per
- * batch. This deliberately replaces an earlier design that queued large
- * exports as a background job processed via Next.js's `after()` API:
- * that API isn't supported when this app is deployed on AWS Amplify
- * Hosting (confirmed against AWS's own Next.js SSR troubleshooting
- * docs), so a "background" export would have silently never finished
- * there. Batches of 3,000 rows keep each response comfortably under
- * Amplify's ~5.72 MB max SSR response size even at the widest column
- * selection, with no background job/polling infrastructure needed at
- * all — every batch is just an ordinary request/response.
+ * Every export — regardless of total size — is fetched in fixed-size
+ * batches of this many rows, one synchronous request per batch. This
+ * deliberately replaces an earlier design that queued large exports as
+ * a background job processed via Next.js's `after()` API: that API
+ * isn't supported when this app is deployed on AWS Amplify Hosting
+ * (confirmed against AWS's own Next.js SSR troubleshooting docs), so a
+ * "background" export would have silently never finished there.
+ * Batches of 3,000 rows keep each response comfortably under Amplify's
+ * ~5.72 MB max SSR response size, with no background job/polling
+ * infrastructure needed at all — every batch is just an ordinary
+ * request/response.
+ *
+ * The batches only ever carry raw row JSON now (never a pre-built
+ * CSV/XLSX file) — the client accumulates rows across every batch and
+ * builds ONE file at the end, triggering exactly one download. Browsers
+ * (Chrome in particular) silently block automatic downloads after the
+ * first one in a burst, so a loop that downloaded each batch as its own
+ * file only ever produced one visible file to the user regardless of
+ * how many batches actually ran.
  */
 const BATCH_SIZE = 3000;
 const HARD_CAP = 500000; // safety ceiling regardless of filters
@@ -46,45 +52,20 @@ export async function previewExportCount(filters: ExportFilters) {
   };
 }
 
-function buildCsv(rows: MemberRow[], columns: string[]) {
-  const selectedCols = EXPORT_COLUMNS.filter((c) => columns.includes(c.key));
-  const header = selectedCols.map((c) => c.label).join(",");
-  const body = rows.map((r) => selectedCols.map((c) => `"${String(c.get(r)).replace(/"/g, '""')}"`).join(",")).join("\n");
-  return "\uFEFF" + header + "\n" + body;
-}
-
-function buildXlsxBase64(rows: MemberRow[], columns: string[]) {
-  const selectedCols = EXPORT_COLUMNS.filter((c) => columns.includes(c.key));
-  const data = rows.map((r) => Object.fromEntries(selectedCols.map((c) => [c.label, c.get(r)])));
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Members");
-  return XLSX.write(wb, { type: "base64", bookType: "xlsx" }) as string;
-}
-
 /**
- * Fetches and builds exactly ONE batch (up to BATCH_SIZE rows) as a
- * complete, ready-to-download file — always a plain synchronous
- * request/response, however many total rows match the filters. The
- * client calls this once per batch (batchIndex 0, 1, 2, ...) and
- * triggers a download for each; see ExportClient.tsx.
+ * Fetches exactly ONE batch (up to BATCH_SIZE rows) of raw row data —
+ * always a plain synchronous request/response, however many total rows
+ * match the filters. The client calls this once per batch (batchIndex
+ * 0, 1, 2, ...), accumulates the rows, and builds a single CSV/XLSX
+ * file client-side once every batch has arrived; see ExportClient.tsx.
  */
-export async function fetchExportBatch(
-  filters: ExportFilters,
-  format: "csv" | "xlsx",
-  columns: string[],
-  batchIndex: number
-) {
+export async function fetchExportRows(filters: ExportFilters, format: "csv" | "xlsx", columns: string[], batchIndex: number) {
   const adminId = await requireExportPermission();
   const total = Math.min(await memberRepository.countForExport(filters), HARD_CAP);
   const totalBatches = Math.max(1, Math.ceil(total / BATCH_SIZE));
   const offset = batchIndex * BATCH_SIZE;
 
   const rows = await memberRepository.forExportPage(filters, offset, BATCH_SIZE);
-
-  const suffix = totalBatches > 1 ? `-batch-${batchIndex + 1}-of-${totalBatches}` : "";
-  const fileName = `bjym-members-export${suffix}.${format}`;
-  const base64 = format === "csv" ? Buffer.from(buildCsv(rows, columns), "utf-8").toString("base64") : buildXlsxBase64(rows, columns);
 
   // Log the export once, on the first batch, with the FULL intended row
   // count — not repeated per batch, and not under-counting a multi-batch
@@ -93,7 +74,7 @@ export async function fetchExportBatch(
     await exportRepository.record({ adminId, format, filters: filters as Record<string, unknown>, columns, recordCount: total });
   }
 
-  return { base64, fileName, rowCount: rows.length, batchIndex, totalBatches };
+  return { rows, rowCount: rows.length, batchIndex, totalBatches };
 }
 
 /**
